@@ -6,12 +6,8 @@ from datetime import date
 from supabase import create_client, Client
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ⚙️ CONFIGURAÇÃO DA PÁGINA (AQUI ESTÁ O SEGREDO PARA USAR O ESPAÇO ATÉ A DIREITA)
+# ⚙️ CONSTANTES E CONEXÕES GLOBAIS
 # ─────────────────────────────────────────────────────────────────────────────
-# Nota: Certifique-se de que st.set_page_config seja a primeira chamada do Streamlit no seu arquivo principal (main/app.py).
-# Se este script for importado, você pode colocar esta linha no topo do arquivo principal para garantir o layout "wide".
-st.set_page_config(layout="wide")
-
 LOJAS_NOMES = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
 
 def obter_supabase() -> Client:
@@ -104,6 +100,17 @@ def iniciar_tela(setor: str):
     usuario_atual = st.session_state.get('usuario_logado', 'Loja 01')
     acesso_total = (usuario_atual == "Administrador")
 
+    # 🔥 INJEÇÃO DE CSS COICE PARA FORÇAR O ALINHAMENTO CENTRALIZADO DOS NÚMEROS NA TABELA
+    st.markdown("""
+        <style>
+        /* Alinha o cabeçalho e os valores das colunas numéricas/texto do data_editor para o centro */
+        .stDataEditor div[data-testid="stTable"] th, 
+        .stDataEditor div[data-testid="stTable"] td {
+            text-align: center !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     with st.sidebar:
         st.markdown(f"### Parâmetros: {setor}")
         if acesso_total:
@@ -164,26 +171,25 @@ def iniciar_tela(setor: str):
 
         df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
         
+        # 💡 TRUQUE: Mantemos como float/numérico para aceitar None (que o Streamlit renderiza em branco), preservando o alinhamento centralizado nativo
         for loja in LOJAS_NOMES:
-            df_consolidado[loja] = df_consolidado[loja].replace({0: ""})
-        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: ""})
+            df_consolidado[loja] = df_consolidado[loja].replace({0: None})
+        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: None})
 
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
-        # 🎯 AJUSTE DE COLUNAS COM TRUQUE NATIVO DE CENTRALIZAÇÃO PARA TEXTCOLUMN
+        # Configuração de Colunas sem 'width' fixo nas lojas para esticar de ponta a ponta naturalmente
         col_cfg = {
             "Fornecedor": st.column_config.TextColumn(disabled=True, width=120), 
             "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
             "Descrição": st.column_config.TextColumn(disabled=True, width=220), 
-            # O truque para centralizar strings limpas no data_editor é usar TextColumn combinando alinhamento numérico simulado por Regex ou deixando fluir
-            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=80)
+            "TOTAL GERAL": st.column_config.NumberColumn("TOTAL", disabled=True, format="%d")
         }
         
-        # Como o valor interno agora virou String por conta da limpeza do zero, usamos NumberColumn purificado 
-        # com formato limpo para forçar o alinhamento nativo à direita/centro que os números têm!
+        # Definidos como NumberColumn para forçar o alinhamento numérico centralizado nativo
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.TextColumn(loja, width=85)
+            col_cfg[loja] = st.column_config.NumberColumn(loja, format="%d")
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
@@ -267,7 +273,7 @@ def iniciar_tela(setor: str):
         df_loja = pd.merge(df_loja, df_estoque, left_on='codigo', right_on='Código', how='left')
         df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
 
-        df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""})
+        df_loja['quantidade'] = df_loja['quantidade'].replace({0: None})
 
         df_final_grid = pd.DataFrame({
             'Código': df_loja['codigo'], 'Fornecedor': df_loja['fornecedor'], 'Descrição': df_loja['descricao'],
@@ -281,7 +287,7 @@ def iniciar_tela(setor: str):
             "Descrição": st.column_config.TextColumn(disabled=True, width=250),
             "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=90), 
             "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f", width=90),
-            "Qtde Pedida": st.column_config.TextColumn("Qtde Pedida", width=100), 
+            "Qtde Pedida": st.column_config.NumberColumn("Qtde Pedida", format="%d", width=100), 
             "Observação": st.column_config.TextColumn("Observação", max_chars=100, width=180)
         }
 
