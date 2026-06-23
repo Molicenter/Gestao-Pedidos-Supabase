@@ -5,3 +5,4 @@ openpyxl
 SQLAlchemy
 psycopg2-binary
 pytz
+supabase
