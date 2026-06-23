@@ -187,9 +187,10 @@ def iniciar_tela(setor: str):
                     for _, r in df_editado.iterrows():
                         val_loja = r[loja_nome]
                         
-                        if pd.notna(val_loja):
+                        # Tratamento blindado: evita erros de conversão com pd.NA e nulos
+                        if pd.notna(val_loja) and not isinstance(val_loja, (type(pd.NA), type(None))):
                             val_str = str(val_loja).strip()
-                            if val_str != "" and val_str != "0" and val_str != "0.0":
+                            if val_str != "" and val_str != "0" and val_str != "0.0" and val_str.lower() != "<na>":
                                 try:
                                     qtd_int = int(float(val_str.replace(',', '.')))
                                     if qtd_int > 0:
@@ -288,9 +289,9 @@ def iniciar_tela(setor: str):
                 lista_inserts = []
                 for _, r in grid_editado.iterrows():
                     val_ped = r["Qtde Pedida"]
-                    if pd.notna(val_ped):
+                    if pd.notna(val_ped) and not isinstance(val_ped, (type(pd.NA), type(None))):
                         val_str = str(val_ped).strip()
-                        if val_str != "" and val_str != "0" and val_str != "0.0":
+                        if val_str != "" and val_str != "0" and val_str != "0.0" and val_str.lower() != "<na>":
                             try:
                                 qtd_int = int(float(val_str.replace(',', '.')))
                                 if qtd_int > 0:
@@ -400,4 +401,4 @@ def iniciar_tela(setor: str):
                             "disponivel": bool(row[col_loja])
                         })
                 supabase.table("produtos_lojas").upsert(lista_upserts_permissoes, on_conflict="codigo_produto, loja").execute()
-                st.success("Matriz de travas atualizada!"); st.rerun()
+                st.success("Matriz de travas updated!"); st.rerun()
