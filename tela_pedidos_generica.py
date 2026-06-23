@@ -57,18 +57,16 @@ def injetar_botao_impressao():
             box-sizing: border-box;
             height: 38px;
         ">
-            🖨️ Imprimir
+            🖨 Honor / Imprimir
         </button>
         """,
         height=42,
     )
 
 def exibir_status_digitacao_lojas(df_pedidos_hoje):
-    """Gera um painel indicando quais lojas já digitaram e quais estão pendentes"""
     st.markdown("##### 🏪 Status de Digitação das Lojas (Hoje)")
     lojas_que_digitam = set()
     if not df_pedidos_hoje.empty:
-        # Identifica o número da loja que está no banco e mapeia de volta para o nome amigável
         lojas_codigos = df_pedidos_hoje["loja"].unique()
         for c in lojas_codigos:
             lojas_que_digitam.add(f"Loja {c:02d}")
@@ -79,7 +77,7 @@ def exibir_status_digitacao_lojas(df_pedidos_hoje):
             if loja_nome in lojas_que_digitam:
                 st.markdown(f"<div style='text-align:center; background-color:#d4edda; color:#155724; padding:5px; border-radius:5px; font-size:12px; font-weight:bold;'>{loja_nome}<br>✅ OK</div>", unsafe_allow_html=True)
             else:
-                st.markdown(f"<div style='text-align:center; background-color:#f8d7da; color:#721c24; padding:5px; border-radius:5px; font-size:12px; font-weight:bold;'>{loja_nome}<br>❌ Pendente</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='text-align:center; background-color:#f8d7da; color:#721c24; padding:5px; border-radius:5px; font-size:12px; font-weight:bold;'>{loja_nome}<br>❌ Faltando</div>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -90,7 +88,6 @@ def iniciar_tela(setor: str):
     usuario_atual = st.session_state.get('usuario_logado', 'Loja 01')
     acesso_total = (usuario_atual == "Administrador")
 
-    # Configuração de abas de perfil
     with st.sidebar:
         st.markdown(f"### Parâmetros: {setor}")
         if acesso_total:
@@ -100,7 +97,6 @@ def iniciar_tela(setor: str):
         else:
             perfil_navegacao = "Visão das Lojas"
 
-    # 🛑 BOTÃO DE SEGURANÇA: LIMPAR PLANILHA (ADMIN)
     if acesso_total and perfil_navegacao in ["Separação e Fechamento", "Visão Fornecedores (Resumo)"]:
         with st.sidebar:
             st.markdown("---")
@@ -118,7 +114,6 @@ def iniciar_tela(setor: str):
     if perfil_navegacao == "Separação e Fechamento":
         st.markdown(f"## 📊 Separação e Fechamento — {setor}")
         
-        # Puxa produtos do setor e os pedidos do dia atual
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
         
@@ -129,49 +124,45 @@ def iniciar_tela(setor: str):
             st.warning("Nenhum produto cadastrado para este setor.")
             return
 
-        # 📊 INDICADORES E RESUMOS SUPERIORES
         exibir_status_digitacao_lojas(df_ped)
         
-        # Monta a matriz horizontal de pedidos (Pivot Table)
         if not df_ped.empty:
             df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
             for n in range(1, 9):
                 if n in df_pivot.columns: df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
-            
-            # Conta itens preenchidos (que têm total geral > 0)
             itens_com_pedido = df_pivot.shape[0]
         else:
             df_pivot = pd.DataFrame(columns=['codigo_produto'])
             itens_com_pedido = 0
 
-        # Exibe métrica de itens ativos digitados
-        st.metric(label="📦 Total de Itens Solicitados Hoje", value=f"{itens_com_pedido} produtos", help="Quantidade de produtos únicos que receberam pedidos hoje pelas lojas.")
+        st.metric(label="📦 Total de Itens Solicitados Hoje", value=f"{itens_com_pedido} produtos")
 
-        # Une o cadastro mestre com a matriz pivotada de quantidades
         df_consolidado = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
         
         for loja in LOJAS_NOMES:
-            if loja not in df_consolidado.columns: df_consolidado[loja] = 0.0
-            df_consolidado[loja] = df_consolidado[loja].fillna(0.0)
+            if loja not in df_consolidado.columns: df_consolidado[loja] = None  # Altera de 0.0 para None para deixar a célula vazia!
+            # Substitui os NaN por None em vez de zero, mantendo limpo sem o número 0
+            df_consolidado[loja] = df_consolidado[loja].where(df_consolidado[loja].notna(), None)
 
-        df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
+        # Calcula o TOTAL GERAL tratando os Nulos (None) temporariamente como zero para a soma matemática
+        df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].fillna(0.0).sum(axis=1)
+        # Se o total for zero, limpa também a coluna do total para não poluir
+        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0.0: None, 0: None})
+
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
-        # Configura o Editor interativo com larguras otimizadas para caber na tela!
         col_cfg = {
             "Fornecedor": st.column_config.TextColumn(disabled=True, width="medium"), 
             "Código": st.column_config.NumberColumn(disabled=True, width="small"), 
             "Descrição": st.column_config.TextColumn(disabled=True, width="large"), 
-            "TOTAL GERAL": st.column_config.NumberColumn("TOTAL ▶️", disabled=True, width="small")
+            "TOTAL GERAL": st.column_config.NumberColumn("TOTAL ▶️", disabled=True, width="small", format="%.2f")
         }
-        # Força as lojas a ocuparem pouco espaço para espremer todas na horizontal
         for loja in LOJAS_NOMES: 
             col_cfg[loja] = st.column_config.NumberColumn(loja, format="%.2f", min_value=0.0, width=80)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
-        # 🛠️ LINHA UNIFICADA DE BOTÕES (Salvar, Exportar, Imprimir)
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
         with c_salvar:
             btn_salvar = st.button("💾 Salvar Ajustes Administrativos", type="primary", use_container_width=True)
@@ -195,10 +186,11 @@ def iniciar_tela(setor: str):
                     
                     lista_insert = []
                     for _, r in df_editado.iterrows():
-                        if float(r[loja_nome]) > 0:
+                        val_loja = r[loja_nome]
+                        if val_loja is not None and float(val_loja) > 0:
                             lista_insert.append({
                                 "data_pedido": str(date.today()), "setor": setor, "loja": n_loja,
-                                "codigo_produto": int(r["Código"]), "quantidade": float(r[loja_nome]), "usuario": usuario_atual
+                                "codigo_produto": int(r["Código"]), "quantidade": float(val_loja), "usuario": usuario_atual
                             })
                     if lista_insert: supabase.table("pedidos").insert(lista_insert).execute()
             st.success("Alterações consolidadas com sucesso!"); st.rerun()
@@ -232,11 +224,12 @@ def iniciar_tela(setor: str):
 
         if not df_existente.empty:
             df_loja = pd.merge(df_loja, df_existente, on='codigo_produto', how='left')
-            df_loja['quantidade'] = df_loja['quantidade'].fillna(0.0)
+            # Deixa nulo (None) se a quantidade for nula ou menor/igual a zero para sumir com os zeros da tela
+            df_loja['quantidade'] = df_loja['quantidade'].where(df_loja['quantidade'] > 0, None)
             df_loja['observacao'] = df_loja['observacao'].fillna("")
             itens_digitados = df_existente[df_existente['quantidade'] > 0].shape[0]
         else:
-            df_loja['quantidade'] = 0.0
+            df_loja['quantidade'] = None  # Começa totalmente limpo sem os zeros
             df_loja['observacao'] = ""
             itens_digitados = 0
 
@@ -258,9 +251,9 @@ def iniciar_tela(setor: str):
             "Qtde Pedida": st.column_config.NumberColumn("Qtde Pedida", min_value=0.0, step=1.0, width=100), "Observação": st.column_config.TextColumn("Observação", max_chars=100)
         }
 
-        grid_editado = st.data_editor(df_final_grid, column_config=col_cfg_l, hide_index=True, use_container_width=True, height=450)
+        # 🚨 REMOVIDO O HEIGHT FIXO PARA A TABELA ABRIR COMPLETA ATÉ EMBAIXO!
+        grid_editado = st.data_editor(df_final_grid, column_config=col_cfg_l, hide_index=True, use_container_width=True)
 
-        # 🛠️ LINHA UNIFICADA DE BOTÕES PARA LOJAS
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
         with c_salvar:
             btn_salvar_loja = st.button("💾 Salvar Pedido Oficial", type="primary", use_container_width=True)
@@ -279,7 +272,11 @@ def iniciar_tela(setor: str):
         if btn_salvar_loja:
             with st.spinner("Gravando no banco de dados relacional..."):
                 supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
+                
+                # Valida apenas linhas cujo valor inserido é maior que zero e não nulo
+                grid_editado['Qtde Pedida'] = grid_editado['Qtde Pedida'].fillna(0.0)
                 pedidos_linhas = grid_editado[grid_editado['Qtde Pedida'] > 0]
+                
                 if not pedidos_linhas.empty:
                     lista_inserts = []
                     for _, r in pedidos_linhas.iterrows():
@@ -297,7 +294,7 @@ def iniciar_tela(setor: str):
         st.markdown(f"## 🚚 Resumo Consolidado por Fornecedor — {setor}")
         
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor").eq("setor", setor).execute()
-        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantity, quantidade" if False else "codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
+        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
         
         df_prod = pd.DataFrame(resp_prod.data)
         df_ped = pd.DataFrame(resp_ped.data)
@@ -312,11 +309,20 @@ def iniciar_tela(setor: str):
             
         df_mestre = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='inner').drop(columns=['codigo_produto'])
         
+        # Garante que qualquer número 0 ou 0.0 vire uma string perfeitamente vazia ""
         for l in LOJAS_NOMES: 
             if l not in df_mestre.columns: df_mestre[l] = ""
             else: df_mestre[l] = df_mestre[l].fillna(0).apply(lambda x: int(x) if x == int(x) else x).astype(str).replace({"0": "", "0.0": "", "nan": ""})
 
-        # 🛠️ LINHA UNIFICADA DE BOTÕES PARA COMPRADORES
+        # Renderiza agrupado por Fornecedor na tela
+        for forn in df_mestre["fornecedor"].dropna().unique():
+            df_forn_view = df_mestre[df_mestre["fornecedor"] == forn][["codigo", "descricao"] + [col for col in LOJAS_NOMES if col in df_mestre.columns]].rename(columns={'codigo': 'Código', 'descricao': 'Produto'})
+            with st.container(border=True):
+                st.markdown(f"##### Fornecedor: {forn}")
+                st.dataframe(df_forn_view, hide_index=True, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        # 🛠️ MOVIDO PARA BAIXO: LINHA UNIFICADA DE BOTÕES PARA COMPRADORES
         c_excel, c_print = st.columns([4, 1])
         with c_excel:
             dados_excel = gerar_excel_download(df_mestre, f"Fornecedores {setor}")
@@ -329,14 +335,6 @@ def iniciar_tela(setor: str):
             )
         with c_print:
             injetar_botao_impressao()
-
-        st.markdown("---")
-        # Renderiza agrupado por Fornecedor na tela
-        for forn in df_mestre["fornecedor"].dropna().unique():
-            df_forn_view = df_mestre[df_mestre["fornecedor"] == forn][["codigo", "descricao"] + [col for col in LOJAS_NOMES if col in df_mestre.columns]].rename(columns={'codigo': 'Código', 'descricao': 'Produto'})
-            with st.container(border=True):
-                st.markdown(f"##### Fornecedor: {forn}")
-                st.dataframe(df_forn_view, hide_index=True, use_container_width=True)
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 4 — CATÁLOGO DE PRODUTOS
