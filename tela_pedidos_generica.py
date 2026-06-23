@@ -19,16 +19,11 @@ conn_pg = st.connection("banco_erp", type="sql")
 # 🔍 FUNÇÕES AUXILIARES DE CONSULTA E UTILITÁRIOS
 # ─────────────────────────────────────────────────────────────────────────────
 def converter_para_int_seguro(valor) -> int:
-    """Converte qualquer tipo de entrada (string, float, pd.NA) para int de forma segura. 
-    Retorna 0 se for inválido, vazio ou zero."""
     if pd.isna(valor) or valor is None:
         return 0
-    
     val_str = str(valor).strip().replace(',', '.')
-    
     if val_str == "" or val_str.lower() in ["<na>", "none", "nan", "null"]:
         return 0
-        
     try:
         qtd_float = float(val_str)
         return int(qtd_float)
@@ -105,6 +100,16 @@ def iniciar_tela(setor: str):
     usuario_atual = st.session_state.get('usuario_logado', 'Loja 01')
     acesso_total = (usuario_atual == "Administrador")
 
+    # 🔥 INJEÇÃO DE CSS PARA REMOVER MARGENS LATERAIS DO CONTEÚDO E CENTRALIZAR TEXTO DO EDITOR
+    st.markdown("""
+        <style>
+        /* Força o contêiner principal a usar toda a largura disponível na direita */
+        div[data-testid="stComponentStack"] { width: 100% !important; }
+        /* Centraliza o texto dentro das células do editor de dados */
+        div[data-testid="stTable"] td { text-align: center !important; }
+        </style>
+    """, unsafe_allow_html=True)
+
     with st.sidebar:
         st.markdown(f"### Parâmetros: {setor}")
         if acesso_total:
@@ -154,7 +159,6 @@ def iniciar_tela(setor: str):
 
         st.metric(label="📦 Total de Itens Solicitados Hoje", value=f"{itens_com_pedido} produtos")
 
-        # Garante a existência de todas as colunas
         for loja in LOJAS_NOMES:
             if loja not in df_pivot.columns:
                 df_pivot[loja] = 0.0
@@ -173,16 +177,16 @@ def iniciar_tela(setor: str):
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
-        # Configuração com larguras dinâmicas para as lojas expandirem até o final da tela azul
+        # Redução equilibrada de tamanho nos textos para abrir espaço completo na horizontal
         col_cfg = {
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=130), 
-            "Código": st.column_config.NumberColumn(disabled=True, width=80, format="%d"), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width=250), 
-            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=80)
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=110), 
+            "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
+            "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
+            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
         }
-        # Removido o width fixo das lojas para que o conteiner distribua o tamanho proporcionalmente na tela inteira
+        # Força o alinhamento das lojas no centro!
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.TextColumn(loja)
+            col_cfg[loja] = st.column_config.TextColumn(loja, width=75)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
@@ -275,9 +279,9 @@ def iniciar_tela(setor: str):
         }).sort_values(by='Descrição')
 
         col_cfg_l = {
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=130), 
-            "Código": st.column_config.NumberColumn(disabled=True, format="%d", width=80), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width=300),
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=120), 
+            "Código": st.column_config.NumberColumn(disabled=True, format="%d", width=70), 
+            "Descrição": st.column_config.TextColumn(disabled=True, width=250),
             "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=90), 
             "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f", width=90),
             "Qtde Pedida": st.column_config.TextColumn("Qtde Pedida", width=100), 
