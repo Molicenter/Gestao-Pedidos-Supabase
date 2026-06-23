@@ -187,7 +187,6 @@ def iniciar_tela(setor: str):
                     for _, r in df_editado.iterrows():
                         val_loja = r[loja_nome]
                         
-                        # Tratamento 100% blindado contra pd.NA, strings vazias e nulos do Pandas
                         if pd.notna(val_loja):
                             val_str = str(val_loja).strip()
                             if val_str != "" and val_str != "0" and val_str != "0.0":
@@ -198,7 +197,7 @@ def iniciar_tela(setor: str):
                                             "data_pedido": str(date.today()), "setor": setor, "loja": n_loja,
                                             "codigo_produto": int(r["Código"]), "quantidade": qtd_int, "usuario": usuario_atual
                                         })
-                                catch ValueError:
+                                except ValueError:
                                     pass
                                 
                     if lista_insert: supabase.table("pedidos").insert(lista_insert).execute()
@@ -312,7 +311,6 @@ def iniciar_tela(setor: str):
         st.markdown(f"## 🚚 Resumo Consolidado por Fornecedor — {setor}")
         
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor").eq("setor", setor).execute()
-        # 🛠️ CORREÇÃO AQUI: Mudado de "quantity" para "quantidade"
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
         
         df_prod = pd.DataFrame(resp_prod.data)
