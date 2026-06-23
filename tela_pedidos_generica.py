@@ -100,13 +100,15 @@ def iniciar_tela(setor: str):
     usuario_atual = st.session_state.get('usuario_logado', 'Loja 01')
     acesso_total = (usuario_atual == "Administrador")
 
-    # 🔥 INJEÇÃO DE CSS PARA REMOVER MARGENS LATERAIS DO CONTEÚDO E CENTRALIZAR TEXTO DO EDITOR
+    # 🔥 INJEÇÃO DE CSS REFORÇADA PARA CENTRALIZAR OS COMPONENTES INTERNOS DO DATA_EDITOR
     st.markdown("""
         <style>
-        /* Força o contêiner principal a usar toda a largura disponível na direita */
+        /* Expande o bloco do grid para ocupar toda a largura da tela */
         div[data-testid="stComponentStack"] { width: 100% !important; }
-        /* Centraliza o texto dentro das células do editor de dados */
-        div[data-testid="stTable"] td { text-align: center !important; }
+        /* Força centralização de textos e cabeçalhos no Canvas do data editor */
+        .stDataEditor div, .stDataEditor th, .stDataEditor td {
+            text-align: center !important;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -150,8 +152,10 @@ def iniciar_tela(setor: str):
         
         if not df_ped.empty:
             df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
-            for n in range(1, 9):
+            for n in range(1, 8):
                 if n in df_pivot.columns: df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
+            if 8 in df_pivot.columns: 
+                df_pivot = df_pivot.rename(columns={8: "Loja 08"})
             itens_com_pedido = df_pivot.shape[0]
         else:
             df_pivot = pd.DataFrame(columns=['codigo_produto'])
@@ -170,23 +174,25 @@ def iniciar_tela(setor: str):
 
         df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
         
+        # 💡 TRUQUE PERFEITO: Trocar os zeros por float('nan') para sumir com o valor sem estragar a coluna numérica
         for loja in LOJAS_NOMES:
-            df_consolidado[loja] = df_consolidado[loja].replace({0: ""})
-        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: ""})
+            df_consolidado[loja] = df_consolidado[loja].replace({0: float('nan')})
+        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: float('nan')})
 
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
-        # Redução equilibrada de tamanho nos textos para abrir espaço completo na horizontal
+        # Configurações usando o NumberColumn padrão para forçar alinhamento ideal e responsivo
         col_cfg = {
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=110), 
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=120), 
             "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
-            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
+            "Descrição": st.column_config.TextColumn(disabled=True, width=220), 
+            "TOTAL GERAL": st.column_config.NumberColumn("TOTAL", disabled=True, width=80, format="%d")
         }
-        # Força o alinhamento das lojas no centro!
+        
+        # Configurando as lojas estritamente como NumberColumn
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.TextColumn(loja, width=75)
+            col_cfg[loja] = st.column_config.NumberColumn(loja, width=80, format="%d")
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
@@ -270,7 +276,7 @@ def iniciar_tela(setor: str):
         df_loja = pd.merge(df_loja, df_estoque, left_on='codigo', right_on='Código', how='left')
         df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
 
-        df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""})
+        df_loja['quantidade'] = df_loja['quantidade'].replace({0: float('nan')})
 
         df_final_grid = pd.DataFrame({
             'Código': df_loja['codigo'], 'Fornecedor': df_loja['fornecedor'], 'Descrição': df_loja['descricao'],
@@ -284,7 +290,7 @@ def iniciar_tela(setor: str):
             "Descrição": st.column_config.TextColumn(disabled=True, width=250),
             "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=90), 
             "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f", width=90),
-            "Qtde Pedida": st.column_config.TextColumn("Qtde Pedida", width=100), 
+            "Qtde Pedida": st.column_config.NumberColumn("Qtde Pedida", format="%d", width=100), 
             "Observação": st.column_config.TextColumn("Observação", max_chars=100, width=180)
         }
 
