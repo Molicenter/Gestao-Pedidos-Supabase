@@ -13,18 +13,9 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. IMPORTAÇÃO DOS MÓDULOS 
+# 2. IMPORTAÇÃO DOS MÓDULOS (Enxuta: apenas a tela genérica unificada)
 # ─────────────────────────────────────────────────────────────────────────────
-import flv_folhagem
-import flv_normal
-import flv_ofertas
-import flv_oriental
-import acougue_total
-import acougue_especiais
-import acougue_pecas
-import embalagem
-import padaria_confeitaria
-import materia_prima
+import tela_pedidos_generica # <-- Apenas este arquivo cuidará de todos os setores!
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. LINKS E VARIÁVEIS DE IMAGENS EXTERNAS
@@ -339,7 +330,7 @@ def renderizar_dashboard():
     """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. ROTEADOR DE TELAS
+# 8. ROTEADOR DE TELAS (Refatorado para Supabase)
 # ─────────────────────────────────────────────────────────────────────────────
 if st.session_state['modulo_ativo'] == 'Home':
     renderizar_dashboard()
@@ -356,33 +347,22 @@ else:
             st.session_state['modulo_ativo'] = 'Home'
             st.rerun()
 
-    # Execução do módulo selecionado
-    if st.session_state['modulo_ativo'] == 'flv_folhagem':
-        flv_folhagem.iniciar_tela()
-        
-    elif st.session_state['modulo_ativo'] == 'flv_normal':
-        flv_normal.iniciar_tela()
+    # Dicionário que mapeia o clique do botão ao nome exato do Setor no Supabase
+    MAPA_SETORES_SUPABASE = {
+        'flv_folhagem': "Folhagem",
+        'flv_normal': "FLV Normal",
+        'flv_ofertas': "FLV Ofertas",
+        'flv_oriental': "FLV Oriental",
+        'acougue_especiais': "Açougue Especiais",
+        'acougue_total': "Açougue Adriano",
+        'acougue_pecas': "Peças Açougue - Manoel",
+        'embalagem': "Embalagens",
+        'padaria_confeitaria': "Padaria e Confeitaria",
+        'materia_prima': "Matéria Prima"
+    }
 
-    elif st.session_state['modulo_ativo'] == 'flv_ofertas':
-        flv_ofertas.iniciar_tela()
-
-    elif st.session_state['modulo_ativo'] == 'flv_oriental':
-        flv_oriental.iniciar_tela()
-
-    elif st.session_state['modulo_ativo'] == 'embalagem':
-        embalagem.iniciar_tela()
-
-    elif st.session_state['modulo_ativo'] == 'padaria_confeitaria':
-        padaria_confeitaria.iniciar_tela()
-
-    elif st.session_state['modulo_ativo'] == 'materia_prima':
-        materia_prima.iniciar_tela()
+    modulo_atual = st.session_state['modulo_ativo']
     
-    elif st.session_state['modulo_ativo'] == 'acougue_especiais':
-        acougue_especiais.iniciar_tela()
-
-    elif st.session_state['modulo_ativo'] == 'acougue_total':
-        acougue_total.iniciar_tela()
-
-    elif st.session_state['modulo_ativo'] == 'acougue_pecas':
-        acougue_pecas.iniciar_tela()
+    if modulo_atual in MAPA_SETORES_SUPABASE:
+        # Chama a tela única passando o nome do setor por parâmetro
+        tela_pedidos_generica.iniciar_tela(setor=MAPA_SETORES_SUPABASE[modulo_atual])
