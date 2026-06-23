@@ -139,13 +139,11 @@ def iniciar_tela(setor: str):
 
         df_consolidado = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
         
-        # Garante a soma matemática sem quebrar
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].fillna(0).astype(int)
 
         df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
         
-        # Estratégia perfeita: Troca o 0 por vazio "" visualmente para não poluir com zeros ou "None"
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].replace({0: ""})
         df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: ""})
@@ -153,7 +151,6 @@ def iniciar_tela(setor: str):
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
-        # Como os dados viraram texto limpo (""), usamos TextColumn ou NumberColumn adaptativo
         col_cfg = {
             "Fornecedor": st.column_config.TextColumn(disabled=True, width=100), 
             "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
@@ -189,17 +186,20 @@ def iniciar_tela(setor: str):
                     lista_insert = []
                     for _, r in df_editado.iterrows():
                         val_loja = r[loja_nome]
-                        # Validação robusta contra strings vazias, None ou zeros espalhados
-                        if val_loja is not None and str(val_loja).strip() != "" and str(val_loja).strip() != "0":
-                            try:
-                                qtd_int = int(float(str(val_loja).replace(',', '.')))
-                                if qtd_int > 0:
-                                    lista_insert.append({
-                                        "data_pedido": str(date.today()), "setor": setor, "loja": n_loja,
-                                        "codigo_produto": int(r["Código"]), "quantidade": qtd_int, "usuario": usuario_atual
-                                    })
-                            except ValueError:
-                                pass # Ignora caso seja algum texto inválido digitado por engano
+                        
+                        # Tratamento 100% blindado contra pd.NA, strings vazias e nulos do Pandas
+                        if pd.notna(val_loja):
+                            val_str = str(val_loja).strip()
+                            if val_str != "" and val_str != "0" and val_str != "0.0":
+                                try:
+                                    qtd_int = int(float(val_str.replace(',', '.')))
+                                    if qtd_int > 0:
+                                        lista_insert.append({
+                                            "data_pedido": str(date.today()), "setor": setor, "loja": n_loja,
+                                            "codigo_produto": int(r["Código"]), "quantidade": qtd_int, "usuario": usuario_atual
+                                        })
+                                catch ValueError:
+                                    pass
                                 
                     if lista_insert: supabase.table("pedidos").insert(lista_insert).execute()
             st.success("Alterações consolidadas com sucesso!"); st.rerun()
@@ -247,7 +247,6 @@ def iniciar_tela(setor: str):
         df_loja = pd.merge(df_loja, df_estoque, left_on='codigo', right_on='Código', how='left')
         df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
 
-        # Remove o zero visualmente trocando por "" na coluna de digitação
         df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""})
 
         df_final_grid = pd.DataFrame({
@@ -290,16 +289,18 @@ def iniciar_tela(setor: str):
                 lista_inserts = []
                 for _, r in grid_editado.iterrows():
                     val_ped = r["Qtde Pedida"]
-                    if val_ped is not None and str(val_ped).strip() != "" and str(val_ped).strip() != "0":
-                        try:
-                            qtd_int = int(float(str(val_ped).replace(',', '.')))
-                            if qtd_int > 0:
-                                lista_inserts.append({
-                                    "data_pedido": str(date.today()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["Código"]),
-                                    "quantidade": qtd_int, "observacao": str(r["Observação"]).strip() if r["Observação"] else None, "usuario": usuario_atual
-                                })
-                        except ValueError:
-                            pass
+                    if pd.notna(val_ped):
+                        val_str = str(val_ped).strip()
+                        if val_str != "" and val_str != "0" and val_str != "0.0":
+                            try:
+                                qtd_int = int(float(val_str.replace(',', '.')))
+                                if qtd_int > 0:
+                                    lista_inserts.append({
+                                        "data_pedido": str(date.today()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["Código"]),
+                                        "quantidade": qtd_int, "observacao": str(r["Observação"]).strip() if r["Observação"] else None, "usuario": usuario_atual
+                                    })
+                            except ValueError:
+                                pass
                 if lista_inserts:
                     supabase.table("pedidos").insert(lista_inserts).execute()
             st.success("Pedido gravado instantaneamente no Supabase!"); st.rerun()
@@ -311,7 +312,8 @@ def iniciar_tela(setor: str):
         st.markdown(f"## 🚚 Resumo Consolidado por Fornecedor — {setor}")
         
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor").eq("setor", setor).execute()
-        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantity").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
+        # 🛠️ CORREÇÃO AQUI: Mudado de "quantity" para "quantidade"
+        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
         
         df_prod = pd.DataFrame(resp_prod.data)
         df_ped = pd.DataFrame(resp_ped.data)
