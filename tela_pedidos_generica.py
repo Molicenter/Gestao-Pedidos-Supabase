@@ -10,7 +10,8 @@ from supabase import create_client, Client
 LOJAS_NOMES = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
 
 def obter_supabase() -> Client:
-    return create_client(st.secrets["https://eemfqkxshqqlhdyofgoz.supabase.co"], st.secrets["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlbWZxa3hzaHFxbGhkeW9mZ296Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3ODcwMjUsImV4cCI6MjA5NjM2MzAyNX0.u7F3h4gdJ0JRY8oNe9qfAXNPwL0AWUPEVt0ZWpEC6SY"])
+    # AQUI VOCÊ CHAMA PELO NOME DA VARIÁVEL QUE ESTÁ LÁ NO SECRETS DO PAINEL!
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 conn_pg = st.connection("banco_erp", type="sql")
 
