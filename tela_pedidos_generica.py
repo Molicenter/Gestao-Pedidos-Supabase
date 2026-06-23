@@ -139,23 +139,23 @@ def iniciar_tela(setor: str):
 
         df_consolidado = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
         
-        # Para sumir com o 'None', preenchemos com 0.0, mas formatamos o visual para esconder zeros se necessário
+        # Correção do erro: Voltamos a preencher com 0 para o pandas não quebrar no .sum()
         for loja in LOJAS_NOMES:
-            df_consolidado[loja] = df_consolidado[loja].fillna(0.0)
+            df_consolidado[loja] = df_consolidado[loja].fillna(0).astype(int)
 
         df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
-        # Redução drástica das larguras das colunas para comprimir as 8 lojas na tela horizontal
+        # Formatamos com "%d" para remover as casas decimais (.00) e exibir número limpo
         col_cfg = {
             "Fornecedor": st.column_config.TextColumn(disabled=True, width=100), 
             "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
             "Descrição": st.column_config.TextColumn(disabled=True, width=180), 
-            "TOTAL GERAL": st.column_config.NumberColumn("TOTAL", disabled=True, width=70, format="%.2f")
+            "TOTAL GERAL": st.column_config.NumberColumn("TOTAL", disabled=True, width=70, format="%d")
         }
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.NumberColumn(loja, format="%.2f", min_value=0.0, width=65)
+            col_cfg[loja] = st.column_config.NumberColumn(loja, format="%d", min_value=0, width=65)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
@@ -183,10 +183,10 @@ def iniciar_tela(setor: str):
                     lista_insert = []
                     for _, r in df_editado.iterrows():
                         val_loja = r[loja_nome]
-                        if val_loja and float(val_loja) > 0:
+                        if val_loja and int(val_loja) > 0:
                             lista_insert.append({
                                 "data_pedido": str(date.today()), "setor": setor, "loja": n_loja,
-                                "codigo_produto": int(r["Código"]), "quantidade": float(val_loja), "usuario": usuario_atual
+                                "codigo_produto": int(r["Código"]), "quantidade": int(val_loja), "usuario": usuario_atual
                             })
                     if lista_insert: supabase.table("pedidos").insert(lista_insert).execute()
             st.success("Alterações consolidadas com sucesso!"); st.rerun()
@@ -220,11 +220,11 @@ def iniciar_tela(setor: str):
 
         if not df_existente.empty:
             df_loja = pd.merge(df_loja, df_existente, on='codigo_produto', how='left')
-            df_loja['quantidade'] = df_loja['quantidade'].fillna(0.0)
+            df_loja['quantidade'] = df_loja['quantidade'].fillna(0).astype(int)
             df_loja['observacao'] = df_loja['observacao'].fillna("")
             itens_digitados = df_existente[df_existente['quantidade'] > 0].shape[0]
         else:
-            df_loja['quantidade'] = 0.0
+            df_loja['quantidade'] = 0
             df_loja['observacao'] = ""
             itens_digitados = 0
 
@@ -240,13 +240,14 @@ def iniciar_tela(setor: str):
             'Qtde Pedida': df_loja['quantidade'], 'Observação': df_loja['observacao']
         }).sort_values(by='Descrição')
 
+        # Ajuste de formato para %d (Inteiro puro) removendo o ponto decimal
         col_cfg_l = {
             "Fornecedor": st.column_config.TextColumn(disabled=True, width=120), 
             "Código": st.column_config.NumberColumn(disabled=True, format="%d", width=70), 
             "Descrição": st.column_config.TextColumn(disabled=True, width=250),
             "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=90), 
             "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f", width=90),
-            "Qtde Pedida": st.column_config.NumberColumn("Qtde Pedida", min_value=0.0, step=1.0, width=100, format="%.2f"), 
+            "Qtde Pedida": st.column_config.NumberColumn("Qtde Pedida", min_value=0, step=1, width=100, format="%d"), 
             "Observação": st.column_config.TextColumn("Observação", max_chars=100, width=180)
         }
 
@@ -271,7 +272,7 @@ def iniciar_tela(setor: str):
             with st.spinner("Gravando no banco de dados relacional..."):
                 supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
                 
-                grid_editado['Qtde Pedida'] = grid_editado['Qtde Pedida'].fillna(0.0)
+                grid_editado['Qtde Pedida'] = grid_editado['Qtde Pedida'].fillna(0)
                 pedidos_linhas = grid_editado[grid_editado['Qtde Pedida'] > 0]
                 
                 if not pedidos_linhas.empty:
@@ -279,7 +280,7 @@ def iniciar_tela(setor: str):
                     for _, r in pedidos_linhas.iterrows():
                         lista_inserts.append({
                             "data_pedido": str(date.today()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["Código"]),
-                            "quantidade": float(r["Qtde Pedida"]), "observacao": str(r["Observação"]).strip() if r["Observação"] else None, "usuario": usuario_atual
+                            "quantidade": int(r["Qtde Pedida"]), "observacao": str(r["Observação"]).strip() if r["Observação"] else None, "usuario": usuario_atual
                         })
                     supabase.table("pedidos").insert(lista_inserts).execute()
             st.success("Pedido gravado instantaneamente no Supabase!"); st.rerun()
@@ -361,11 +362,9 @@ def iniciar_tela(setor: str):
             "descricao": st.column_config.TextColumn("Descrição do Produto", disabled=True, width=220), 
             "fornecedor": st.column_config.TextColumn("Fornecedor/Marca", width=120)
         }
-        # Reduz as larguras das caixas de seleção das lojas para caber tudo sem rolagem horizontal
         for l in LOJAS_NOMES: 
             col_cfg_c[l] = st.column_config.CheckboxColumn(l, width=65)
 
-        # 🚨 REMOVIDO HEIGHT FIXO PARA ABRIR A BOX COMPLETAMENTE ATÉ EMBAIXO
         edited_cat = st.data_editor(df_cat_completo[["fornecedor", "codigo", "descricao"] + LOJAS_NOMES], use_container_width=True, hide_index=True, column_config=col_cfg_c)
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -382,4 +381,4 @@ def iniciar_tela(setor: str):
                             "disponivel": bool(row[col_loja])
                         })
                 supabase.table("produtos_lojas").upsert(lista_upserts_permissoes, on_conflict="codigo_produto, loja").execute()
-                st.success("Matriz de travas atualizada!"); st.rerun()
+                st.success("Matriz de travas updated!"); st.rerun()
