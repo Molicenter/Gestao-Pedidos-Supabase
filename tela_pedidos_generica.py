@@ -19,13 +19,19 @@ conn_pg = st.connection("banco_erp", type="sql")
 # 🔍 FUNÇÕES AUXILIARES DE CONSULTA E UTILITÁRIOS
 # ─────────────────────────────────────────────────────────────────────────────
 def converter_para_int_seguro(valor) -> int:
+    """Converte qualquer tipo de entrada (string, float, pd.NA) para int de forma segura. 
+    Retorna 0 se for inválido, vazio ou zero."""
     if pd.isna(valor) or valor is None:
         return 0
+    
     val_str = str(valor).strip().replace(',', '.')
+    
     if val_str == "" or val_str.lower() in ["<na>", "none", "nan", "null"]:
         return 0
+        
     try:
-        return int(float(val_str))
+        qtd_float = float(val_str)
+        return int(qtd_float)
     except ValueError:
         return 0
 
@@ -148,20 +154,18 @@ def iniciar_tela(setor: str):
 
         st.metric(label="📦 Total de Itens Solicitados Hoje", value=f"{itens_com_pedido} produtos")
 
-        # 🛠️ PROTEÇÃO ULTRA-ROBUSTA: Cria as colunas das lojas antes da junção para garantir que existam!
+        # Garante a existência de todas as colunas
         for loja in LOJAS_NOMES:
             if loja not in df_pivot.columns:
                 df_pivot[loja] = 0.0
 
         df_consolidado = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
         
-        # Agora o fillna(0) nunca mais vai falhar ou dar KeyError
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].fillna(0).astype(int)
 
         df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
         
-        # Limpa o zero visual substituindo por string vazia ""
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].replace({0: ""})
         df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: ""})
@@ -169,14 +173,16 @@ def iniciar_tela(setor: str):
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
+        # Configuração com larguras dinâmicas para as lojas expandirem até o final da tela azul
         col_cfg = {
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=100), 
-            "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width=180), 
-            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=130), 
+            "Código": st.column_config.NumberColumn(disabled=True, width=80, format="%d"), 
+            "Descrição": st.column_config.TextColumn(disabled=True, width=250), 
+            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=80)
         }
+        # Removido o width fixo das lojas para que o conteiner distribua o tamanho proporcionalmente na tela inteira
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.TextColumn(loja, width=65)
+            col_cfg[loja] = st.column_config.TextColumn(loja)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
@@ -269,9 +275,9 @@ def iniciar_tela(setor: str):
         }).sort_values(by='Descrição')
 
         col_cfg_l = {
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=120), 
-            "Código": st.column_config.NumberColumn(disabled=True, format="%d", width=70), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width=250),
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=130), 
+            "Código": st.column_config.NumberColumn(disabled=True, format="%d", width=80), 
+            "Descrição": st.column_config.TextColumn(disabled=True, width=300),
             "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=90), 
             "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f", width=90),
             "Qtde Pedida": st.column_config.TextColumn("Qtde Pedida", width=100), 
@@ -389,12 +395,12 @@ def iniciar_tela(setor: str):
         for l in LOJAS_NOMES: df_cat_completo[l] = df_cat_completo[l].fillna(True).astype(bool)
 
         col_cfg_c = {
-            "codigo": st.column_config.NumberColumn("Código", disabled=True, format="%d", width=70), 
-            "descricao": st.column_config.TextColumn("Descrição do Produto", disabled=True, width=220), 
-            "fornecedor": st.column_config.TextColumn("Fornecedor/Marca", width=120)
+            "codigo": st.column_config.NumberColumn("Código", disabled=True, format="%d", width=80), 
+            "descricao": st.column_config.TextColumn("Descrição do Produto", disabled=True, width=250), 
+            "fornecedor": st.column_config.TextColumn("Fornecedor/Marca", width=130)
         }
         for l in LOJAS_NOMES: 
-            col_cfg_c[l] = st.column_config.CheckboxColumn(l, width=65)
+            col_cfg_c[l] = st.column_config.CheckboxColumn(l)
 
         edited_cat = st.data_editor(df_cat_completo[["fornecedor", "codigo", "descricao"] + LOJAS_NOMES], use_container_width=True, hide_index=True, column_config=col_cfg_c)
 
@@ -412,4 +418,4 @@ def iniciar_tela(setor: str):
                             "disponivel": bool(row[col_loja])
                         })
                 supabase.table("produtos_lojas").upsert(lista_upserts_permissoes, on_conflict="codigo_produto, loja").execute()
-                st.success("Matriz de travas atualizada!"); st.rerun()
+                st.success("Matriz de travas updated!"); st.rerun()
