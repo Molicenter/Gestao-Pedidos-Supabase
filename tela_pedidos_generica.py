@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
 import io
+import time # <--- ADICIONE ESTA LINHA AQUI!
 from datetime import date
 from supabase import create_client, Client
-
 # ─────────────────────────────────────────────────────────────────────────────
 # ⚙️ CONSTANTES E CONEXÕES GLOBAIS
 # ─────────────────────────────────────────────────────────────────────────────
