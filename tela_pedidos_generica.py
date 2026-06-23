@@ -100,14 +100,13 @@ def iniciar_tela(setor: str):
     usuario_atual = st.session_state.get('usuario_logado', 'Loja 01')
     acesso_total = (usuario_atual == "Administrador")
 
-    # 🔥 INJEÇÃO DE CSS COICE PARA FORÇAR O ALINHAMENTO CENTRALIZADO DOS NÚMEROS NA TABELA
+    # 🔥 INJEÇÃO DE CSS PARA REMOVER MARGENS LATERAIS DO CONTEÚDO E CENTRALIZAR TEXTO DO EDITOR
     st.markdown("""
         <style>
-        /* Alinha o cabeçalho e os valores das colunas numéricas/texto do data_editor para o centro */
-        .stDataEditor div[data-testid="stTable"] th, 
-        .stDataEditor div[data-testid="stTable"] td {
-            text-align: center !important;
-        }
+        /* Força o contêiner principal a usar toda a largura disponível na direita */
+        div[data-testid="stComponentStack"] { width: 100% !important; }
+        /* Centraliza o texto dentro das células do editor de dados */
+        div[data-testid="stTable"] td { text-align: center !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -171,25 +170,23 @@ def iniciar_tela(setor: str):
 
         df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
         
-        # 💡 TRUQUE: Mantemos como float/numérico para aceitar None (que o Streamlit renderiza em branco), preservando o alinhamento centralizado nativo
         for loja in LOJAS_NOMES:
-            df_consolidado[loja] = df_consolidado[loja].replace({0: None})
-        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: None})
+            df_consolidado[loja] = df_consolidado[loja].replace({0: ""})
+        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: ""})
 
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
-        # Configuração de Colunas sem 'width' fixo nas lojas para esticar de ponta a ponta naturalmente
+        # Redução equilibrada de tamanho nos textos para abrir espaço completo na horizontal
         col_cfg = {
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=120), 
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=110), 
             "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width=220), 
-            "TOTAL GERAL": st.column_config.NumberColumn("TOTAL", disabled=True, format="%d")
+            "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
+            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
         }
-        
-        # Definidos como NumberColumn para forçar o alinhamento numérico centralizado nativo
+        # Força o alinhamento das lojas no centro!
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.NumberColumn(loja, format="%d")
+            col_cfg[loja] = st.column_config.TextColumn(loja, width=75)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
@@ -273,7 +270,7 @@ def iniciar_tela(setor: str):
         df_loja = pd.merge(df_loja, df_estoque, left_on='codigo', right_on='Código', how='left')
         df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
 
-        df_loja['quantidade'] = df_loja['quantidade'].replace({0: None})
+        df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""})
 
         df_final_grid = pd.DataFrame({
             'Código': df_loja['codigo'], 'Fornecedor': df_loja['fornecedor'], 'Descrição': df_loja['descricao'],
@@ -287,7 +284,7 @@ def iniciar_tela(setor: str):
             "Descrição": st.column_config.TextColumn(disabled=True, width=250),
             "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=90), 
             "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f", width=90),
-            "Qtde Pedida": st.column_config.NumberColumn("Qtde Pedida", format="%d", width=100), 
+            "Qtde Pedida": st.column_config.TextColumn("Qtde Pedida", width=100), 
             "Observação": st.column_config.TextColumn("Observação", max_chars=100, width=180)
         }
 
