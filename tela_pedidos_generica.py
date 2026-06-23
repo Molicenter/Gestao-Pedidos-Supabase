@@ -136,7 +136,8 @@ def iniciar_tela(setor: str):
     if perfil_navegacao == "Separação e Fechamento":
         st.markdown(f"## 📊 Separação e Fechamento — {setor}")
         
-        resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor").eq("setor", setor).execute()
+        # Inserido 'nome_personalizado' no select para aplicar a regra de prioridade
+        resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
         
         df_prod = pd.DataFrame(resp_prod.data)
@@ -145,6 +146,9 @@ def iniciar_tela(setor: str):
         if df_prod.empty:
             st.warning("Nenhum produto cadastrado para este setor.")
             return
+
+        # Aplica prioridade: se houver nome personalizado válido, substitui a descrição
+        df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
         exibir_status_digitacao_lojas(df_ped)
         
@@ -177,14 +181,12 @@ def iniciar_tela(setor: str):
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
-        # Redução equilibrada de tamanho nos textos para abrir espaço completo na horizontal
         col_cfg = {
             "Fornecedor": st.column_config.TextColumn(disabled=True, width=110), 
             "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
             "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
             "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
         }
-        # Força o alinhamento das lojas no centro!
         for loja in LOJAS_NOMES: 
             col_cfg[loja] = st.column_config.TextColumn(loja, width=75)
         
@@ -239,6 +241,9 @@ def iniciar_tela(setor: str):
         resp_prod = supabase.table("produtos").select("*").eq("setor", setor).eq("ativo", True).execute()
         resp_perm = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").eq("loja", num_loja).eq("disponivel", True).execute()
         resp_med = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
+        resp_existente = supabase.table("pedidos").select("codigo_produto, quantity=quantidade", "observacao").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
+
+        # Correção da digitação da linha acima para evitar erros de retorno de campos no supabase
         resp_existente = supabase.table("pedidos").select("codigo_produto, quantidade, observacao").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
 
         df_prod = pd.DataFrame(resp_prod.data)
@@ -249,6 +254,9 @@ def iniciar_tela(setor: str):
         if df_prod.empty or df_perm.empty:
             st.warning("Nenhum produto liberado para esta loja neste setor.")
             return
+
+        # Aplica a prioridade do apelido (nome_personalizado) se preenchido
+        df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
         df_loja = pd.merge(df_prod, df_perm, left_on='codigo', right_on='codigo_produto', how='inner')
         df_loja = pd.merge(df_loja, df_med, on='codigo_produto', how='left')
@@ -332,7 +340,8 @@ def iniciar_tela(setor: str):
     elif perfil_navegacao == "Visão Fornecedores (Resumo)":
         st.markdown(f"## 🚚 Resumo Consolidado por Fornecedor — {setor}")
         
-        resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor").eq("setor", setor).execute()
+        # Carrega o nome personalizado para ordenação e exibição corretas
+        resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
         
         df_prod = pd.DataFrame(resp_prod.data)
@@ -342,11 +351,14 @@ def iniciar_tela(setor: str):
             st.info("Nenhum pedido realizado hoje para este setor até o momento.")
             return
 
+        # Aplica a regra de prioridade do apelido
+        df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
+
         df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
         for n in range(1, 9):
             if n in df_pivot.columns: df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
             
-        df_mestre = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='inner').drop(columns=['codigo_produto'])
+        df_mestre = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='inner').drop(columns=['codigo_produto', 'nome_personalizado'])
         
         for l in LOJAS_NOMES: 
             if l not in df_mestre.columns: df_mestre[l] = ""
@@ -373,7 +385,7 @@ def iniciar_tela(setor: str):
             injetar_botao_impressao()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 4 — CATÁLOGO DE PRODUTOS
+    # ROTA 4 — CATÁLOGO DE PRODUTOS (TOTALMENTE EDITÁVEL)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Catálogo de Produtos":
         st.markdown(f"## 🗂️ Gestão de Catálogo e Permissões por Loja — {setor}")
@@ -397,29 +409,100 @@ def iniciar_tela(setor: str):
 
         df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
         for l in LOJAS_NOMES: df_cat_completo[l] = df_cat_completo[l].fillna(True).astype(bool)
+        
+        # Garante tratamento de nulos para a coluna customizada
+        df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
 
+        # Configuração das Colunas no Editor de Dados
         col_cfg_c = {
-            "codigo": st.column_config.NumberColumn("Código", disabled=True, format="%d", width=80), 
-            "descricao": st.column_config.TextColumn("Descrição do Produto", disabled=True, width=250), 
+            "codigo": st.column_config.NumberColumn("Cód.", format="%d", width=70), 
+            "descricao": st.column_config.TextColumn("Nome Oficial (ERP)", width=220), 
+            "nome_personalizado": st.column_config.TextColumn("Nome Personalizado [Apelido]", width=220),
             "fornecedor": st.column_config.TextColumn("Fornecedor/Marca", width=130)
         }
         for l in LOJAS_NOMES: 
             col_cfg_c[l] = st.column_config.CheckboxColumn(l)
 
-        edited_cat = st.data_editor(df_cat_completo[["fornecedor", "codigo", "descricao"] + LOJAS_NOMES], use_container_width=True, hide_index=True, column_config=col_cfg_c)
+        # Ordem de exibição idêntica ao painel desejado
+        colunas_exibicao = ["fornecedor", "codigo", "descricao", "nome_personalizado"] + LOJAS_NOMES
+
+        # Ativação do modo dinâmico (num_rows="dynamic")
+        # O uso de disabled=["codigo"] bloqueia a edição do ID de linhas antigas mas libera para novas linhas!
+        edited_cat = st.data_editor(
+            df_cat_completo[colunas_exibicao], 
+            use_container_width=True, 
+            hide_index=True, 
+            column_config=col_cfg_c,
+            num_rows="dynamic",
+            disabled=["codigo"],
+            key="catalogo_editor"
+        )
 
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("💾 Salvar Matriz do Catálogo", type="primary", use_container_width=True):
-            with st.spinner("Atualizando regras de disponibilidade por loja..."):
+            state = st.session_state.get("catalogo_editor")
+            
+            with st.spinner("Sincronizando modificações, inclusões e exclusões com o Supabase..."):
+                
+                # A. PROCESSA EXCLUSÕES (Deletes)
+                if state and state.get("deleted_rows"):
+                    for idx in state["deleted_rows"]:
+                        cod_p = int(df_cat_completo.iloc[idx]["codigo"])
+                        # Remove travas de lojas primeiro (evitar quebra de FK) e depois remove o produto
+                        supabase.table("produtos_lojas").delete().eq("codigo_produto", cod_p).execute()
+                        supabase.table("produtos").delete().eq("codigo", cod_p).execute()
+
+                # B. PROCESSA INCLUSÕES (Inserts)
+                if state and state.get("added_rows"):
+                    for row in state["added_rows"]:
+                        if "codigo" not in row or pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "":
+                            st.error("Erro crítico: Todo novo produto precisa de um Código!")
+                            st.stop()
+                        
+                        cod_p = int(row["codigo"])
+                        new_prod = {
+                            "codigo": cod_p,
+                            "descricao": str(row.get("descricao", "Novo Produto")),
+                            "fornecedor": str(row.get("fornecedor", "Box")),
+                            "nome_personalizado": str(row.get("nome_personalizado", "")).strip() if row.get("nome_personalizado") else None,
+                            "setor": setor,
+                            "ativo": True
+                        }
+                        supabase.table("produtos").insert(new_prod).execute()
+
+                # C. PROCESSA ALTERAÇÕES EM PRODUTOS EXISTENTES (Updates)
+                if state and state.get("edited_rows"):
+                    for idx_str, changes in state["edited_rows"].items():
+                        idx = int(idx_str)
+                        cod_p = int(df_cat_completo.iloc[idx]["codigo"])
+                        
+                        prod_changes = {}
+                        if "descricao" in changes: prod_changes["descricao"] = str(changes["descricao"])
+                        if "fornecedor" in changes: prod_changes["fornecedor"] = str(changes["fornecedor"])
+                        if "nome_personalizado" in changes: 
+                            prod_changes["nome_personalizado"] = str(changes["nome_personalizado"]).strip() if changes["nome_personalizado"] else None
+                        
+                        if prod_changes:
+                            supabase.table("produtos").update(prod_changes).eq("codigo", cod_p).execute()
+
+                # D. SALVA A DISPONIBILIDADE DAS LOJAS (Upsert Geral)
+                # Como edited_cat reflete o estado final em tempo real na tela, varremos para atualizar as travas
                 lista_upserts_permissoes = []
                 for _, row in edited_cat.iterrows():
+                    if pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "": 
+                        continue
                     cod_p = int(row["codigo"])
-                    for num_loja in range(1, 9):
+                    for num_loja in range(1, 8):
                         col_loja = f"Loja {num_loja:02d}"
+                        val_loja = bool(row[col_loja]) if col_loja in row and pd.notna(row[col_loja]) else True
                         lista_upserts_permissoes.append({
                             "codigo_produto": cod_p,
                             "loja": num_loja,
-                            "disponivel": bool(row[col_loja])
+                            "disponivel": val_loja
                         })
-                supabase.table("produtos_lojas").upsert(lista_upserts_permissoes, on_conflict="codigo_produto, loja").execute()
-                st.success("Matriz de travas updated!"); st.rerun()
+                
+                if lista_upserts_permissoes:
+                    supabase.table("produtos_lojas").upsert(lista_upserts_permissoes, on_conflict="codigo_produto, loja").execute()
+
+            st.success("Painel do catálogo totalmente atualizado no Supabase!")
+            st.rerun()
