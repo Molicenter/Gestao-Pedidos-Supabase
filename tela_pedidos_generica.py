@@ -139,23 +139,29 @@ def iniciar_tela(setor: str):
 
         df_consolidado = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
         
-        # Correção do erro: Voltamos a preencher com 0 para o pandas não quebrar no .sum()
+        # Garante a soma matemática sem quebrar
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].fillna(0).astype(int)
 
         df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
+        
+        # Estratégia perfeita: Troca o 0 por vazio "" visualmente para não poluir com zeros ou "None"
+        for loja in LOJAS_NOMES:
+            df_consolidado[loja] = df_consolidado[loja].replace({0: ""})
+        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: ""})
+
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
-        # Formatamos com "%d" para remover as casas decimais (.00) e exibir número limpo
+        # Como os dados viraram texto limpo (""), usamos TextColumn ou NumberColumn adaptativo
         col_cfg = {
             "Fornecedor": st.column_config.TextColumn(disabled=True, width=100), 
             "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
             "Descrição": st.column_config.TextColumn(disabled=True, width=180), 
-            "TOTAL GERAL": st.column_config.NumberColumn("TOTAL", disabled=True, width=70, format="%d")
+            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
         }
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.NumberColumn(loja, format="%d", min_value=0, width=65)
+            col_cfg[loja] = st.column_config.TextColumn(loja, width=65)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
@@ -183,11 +189,18 @@ def iniciar_tela(setor: str):
                     lista_insert = []
                     for _, r in df_editado.iterrows():
                         val_loja = r[loja_nome]
-                        if val_loja and int(val_loja) > 0:
-                            lista_insert.append({
-                                "data_pedido": str(date.today()), "setor": setor, "loja": n_loja,
-                                "codigo_produto": int(r["Código"]), "quantidade": int(val_loja), "usuario": usuario_atual
-                            })
+                        # Validação robusta contra strings vazias, None ou zeros espalhados
+                        if val_loja is not None and str(val_loja).strip() != "" and str(val_loja).strip() != "0":
+                            try:
+                                qtd_int = int(float(str(val_loja).replace(',', '.')))
+                                if qtd_int > 0:
+                                    lista_insert.append({
+                                        "data_pedido": str(date.today()), "setor": setor, "loja": n_loja,
+                                        "codigo_produto": int(r["Código"]), "quantidade": qtd_int, "usuario": usuario_atual
+                                    })
+                            except ValueError:
+                                pass # Ignora caso seja algum texto inválido digitado por engano
+                                
                     if lista_insert: supabase.table("pedidos").insert(lista_insert).execute()
             st.success("Alterações consolidadas com sucesso!"); st.rerun()
 
@@ -234,20 +247,22 @@ def iniciar_tela(setor: str):
         df_loja = pd.merge(df_loja, df_estoque, left_on='codigo', right_on='Código', how='left')
         df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
 
+        # Remove o zero visualmente trocando por "" na coluna de digitação
+        df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""})
+
         df_final_grid = pd.DataFrame({
             'Código': df_loja['codigo'], 'Fornecedor': df_loja['fornecedor'], 'Descrição': df_loja['descricao'],
             'Média (90d)': df_loja['media_dia'], 'Estoque ERP': df_loja['Estoque'],
             'Qtde Pedida': df_loja['quantidade'], 'Observação': df_loja['observacao']
         }).sort_values(by='Descrição')
 
-        # Ajuste de formato para %d (Inteiro puro) removendo o ponto decimal
         col_cfg_l = {
             "Fornecedor": st.column_config.TextColumn(disabled=True, width=120), 
             "Código": st.column_config.NumberColumn(disabled=True, format="%d", width=70), 
             "Descrição": st.column_config.TextColumn(disabled=True, width=250),
             "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=90), 
             "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f", width=90),
-            "Qtde Pedida": st.column_config.NumberColumn("Qtde Pedida", min_value=0, step=1, width=100, format="%d"), 
+            "Qtde Pedida": st.column_config.TextColumn("Qtde Pedida", width=100), 
             "Observação": st.column_config.TextColumn("Observação", max_chars=100, width=180)
         }
 
@@ -272,16 +287,20 @@ def iniciar_tela(setor: str):
             with st.spinner("Gravando no banco de dados relacional..."):
                 supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
                 
-                grid_editado['Qtde Pedida'] = grid_editado['Qtde Pedida'].fillna(0)
-                pedidos_linhas = grid_editado[grid_editado['Qtde Pedida'] > 0]
-                
-                if not pedidos_linhas.empty:
-                    lista_inserts = []
-                    for _, r in pedidos_linhas.iterrows():
-                        lista_inserts.append({
-                            "data_pedido": str(date.today()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["Código"]),
-                            "quantidade": int(r["Qtde Pedida"]), "observacao": str(r["Observação"]).strip() if r["Observação"] else None, "usuario": usuario_atual
-                        })
+                lista_inserts = []
+                for _, r in grid_editado.iterrows():
+                    val_ped = r["Qtde Pedida"]
+                    if val_ped is not None and str(val_ped).strip() != "" and str(val_ped).strip() != "0":
+                        try:
+                            qtd_int = int(float(str(val_ped).replace(',', '.')))
+                            if qtd_int > 0:
+                                lista_inserts.append({
+                                    "data_pedido": str(date.today()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["Código"]),
+                                    "quantidade": qtd_int, "observacao": str(r["Observação"]).strip() if r["Observação"] else None, "usuario": usuario_atual
+                                })
+                        except ValueError:
+                            pass
+                if lista_inserts:
                     supabase.table("pedidos").insert(lista_inserts).execute()
             st.success("Pedido gravado instantaneamente no Supabase!"); st.rerun()
 
@@ -292,7 +311,7 @@ def iniciar_tela(setor: str):
         st.markdown(f"## 🚚 Resumo Consolidado por Fornecedor — {setor}")
         
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor").eq("setor", setor).execute()
-        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
+        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantity").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
         
         df_prod = pd.DataFrame(resp_prod.data)
         df_ped = pd.DataFrame(resp_ped.data)
@@ -381,4 +400,4 @@ def iniciar_tela(setor: str):
                             "disponivel": bool(row[col_loja])
                         })
                 supabase.table("produtos_lojas").upsert(lista_upserts_permissoes, on_conflict="codigo_produto, loja").execute()
-                st.success("Matriz de travas updated!"); st.rerun()
+                st.success("Matriz de travas atualizada!"); st.rerun()
