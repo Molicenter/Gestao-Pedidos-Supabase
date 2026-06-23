@@ -18,6 +18,25 @@ conn_pg = st.connection("banco_erp", type="sql")
 # ─────────────────────────────────────────────────────────────────────────────
 # 🔍 FUNÇÕES AUXILIARES DE CONSULTA E UTILITÁRIOS
 # ─────────────────────────────────────────────────────────────────────────────
+def converter_para_int_seguro(valor) -> int:
+    """Converte qualquer tipo de entrada (string, float, pd.NA) para int de forma segura. 
+    Retorna 0 se for inválido, vazio ou zero."""
+    if pd.isna(valor) or valor is None:
+        return 0
+    
+    val_str = str(valor).strip().replace(',', '.')
+    
+    # Remove marcas de texto nulo do streamlit
+    if val_str == "" or val_str.lower() in ["<na>", "none", "nan", "null"]:
+        return 0
+        
+    try:
+        # Converte primeiro para float caso venha algo como "10.0" ou 10.0
+        qtd_float = float(val_str)
+        return int(qtd_float)
+    except ValueError:
+        return 0
+
 @st.cache_data(ttl=30)
 def buscar_estoque_erp(loja_nome, codigos):
     if not codigos: return pd.DataFrame(columns=["Código", "Estoque"])
@@ -185,23 +204,21 @@ def iniciar_tela(setor: str):
                     
                     lista_insert = []
                     for _, r in df_editado.iterrows():
-                        val_loja = r[loja_nome]
+                        # Captura e converte usando a nova função ultra-segura
+                        qtd_int = converter_para_int_seguro(r[loja_nome])
                         
-                        # Tratamento blindado: evita erros de conversão com pd.NA e nulos
-                        if pd.notna(val_loja) and not isinstance(val_loja, (type(pd.NA), type(None))):
-                            val_str = str(val_loja).strip()
-                            if val_str != "" and val_str != "0" and val_str != "0.0" and val_str.lower() != "<na>":
-                                try:
-                                    qtd_int = int(float(val_str.replace(',', '.')))
-                                    if qtd_int > 0:
-                                        lista_insert.append({
-                                            "data_pedido": str(date.today()), "setor": setor, "loja": n_loja,
-                                            "codigo_produto": int(r["Código"]), "quantidade": qtd_int, "usuario": usuario_atual
-                                        })
-                                except ValueError:
-                                    pass
+                        if qtd_int > 0:
+                            lista_insert.append({
+                                "data_pedido": str(date.today()), 
+                                "setor": setor, 
+                                "loja": n_loja,
+                                "codigo_produto": int(r["Código"]), 
+                                "quantidade": qtd_int, 
+                                "usuario": usuario_atual
+                            })
                                 
-                    if lista_insert: supabase.table("pedidos").insert(lista_insert).execute()
+                    if lista_insert: 
+                        supabase.table("pedidos").insert(lista_insert).execute()
             st.success("Alterações consolidadas com sucesso!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -288,19 +305,18 @@ def iniciar_tela(setor: str):
                 
                 lista_inserts = []
                 for _, r in grid_editado.iterrows():
-                    val_ped = r["Qtde Pedida"]
-                    if pd.notna(val_ped) and not isinstance(val_ped, (type(pd.NA), type(None))):
-                        val_str = str(val_ped).strip()
-                        if val_str != "" and val_str != "0" and val_str != "0.0" and val_str.lower() != "<na>":
-                            try:
-                                qtd_int = int(float(val_str.replace(',', '.')))
-                                if qtd_int > 0:
-                                    lista_inserts.append({
-                                        "data_pedido": str(date.today()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["Código"]),
-                                        "quantidade": qtd_int, "observacao": str(r["Observação"]).strip() if r["Observação"] else None, "usuario": usuario_atual
-                                    })
-                            except ValueError:
-                                pass
+                    qtd_int = converter_para_int_seguro(r["Qtde Pedida"])
+                    
+                    if qtd_int > 0:
+                        lista_inserts.append({
+                            "data_pedido": str(date.today()), 
+                            "setor": setor, 
+                            "loja": num_loja, 
+                            "codigo_produto": int(r["Código"]),
+                            "quantidade": qtd_int, 
+                            "observacao": str(r["Observação"]).strip() if r["Observação"] else None, 
+                            "usuario": usuario_atual
+                        })
                 if lista_inserts:
                     supabase.table("pedidos").insert(lista_inserts).execute()
             st.success("Pedido gravado instantaneamente no Supabase!"); st.rerun()
@@ -401,4 +417,4 @@ def iniciar_tela(setor: str):
                             "disponivel": bool(row[col_loja])
                         })
                 supabase.table("produtos_lojas").upsert(lista_upserts_permissoes, on_conflict="codigo_produto, loja").execute()
-                st.success("Matriz de travas updated!"); st.rerun()
+                st.success("Matriz de travas atualizada!"); st.rerun()
