@@ -241,9 +241,6 @@ def iniciar_tela(setor: str):
         resp_prod = supabase.table("produtos").select("*").eq("setor", setor).eq("ativo", True).execute()
         resp_perm = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").eq("loja", num_loja).eq("disponivel", True).execute()
         resp_med = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
-        resp_existente = supabase.table("pedidos").select("codigo_produto, quantity=quantidade", "observacao").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
-
-        # Correção da digitação da linha acima para evitar erros de retorno de campos no supabase
         resp_existente = supabase.table("pedidos").select("codigo_produto, quantidade, observacao").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
 
         df_prod = pd.DataFrame(resp_prod.data)
