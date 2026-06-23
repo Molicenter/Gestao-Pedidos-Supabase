@@ -19,21 +19,13 @@ conn_pg = st.connection("banco_erp", type="sql")
 # 🔍 FUNÇÕES AUXILIARES DE CONSULTA E UTILITÁRIOS
 # ─────────────────────────────────────────────────────────────────────────────
 def converter_para_int_seguro(valor) -> int:
-    """Converte qualquer tipo de entrada (string, float, pd.NA) para int de forma segura. 
-    Retorna 0 se for inválido, vazio ou zero."""
     if pd.isna(valor) or valor is None:
         return 0
-    
     val_str = str(valor).strip().replace(',', '.')
-    
-    # Remove marcas de texto nulo do streamlit
     if val_str == "" or val_str.lower() in ["<na>", "none", "nan", "null"]:
         return 0
-        
     try:
-        # Converte primeiro para float caso venha algo como "10.0" ou 10.0
-        qtd_float = float(val_str)
-        return int(qtd_float)
+        return int(float(val_str))
     except ValueError:
         return 0
 
@@ -156,13 +148,20 @@ def iniciar_tela(setor: str):
 
         st.metric(label="📦 Total de Itens Solicitados Hoje", value=f"{itens_com_pedido} produtos")
 
+        # 🛠️ PROTEÇÃO ULTRA-ROBUSTA: Cria as colunas das lojas antes da junção para garantir que existam!
+        for loja in LOJAS_NOMES:
+            if loja not in df_pivot.columns:
+                df_pivot[loja] = 0.0
+
         df_consolidado = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
         
+        # Agora o fillna(0) nunca mais vai falhar ou dar KeyError
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].fillna(0).astype(int)
 
         df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
         
+        # Limpa o zero visual substituindo por string vazia ""
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].replace({0: ""})
         df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: ""})
@@ -204,9 +203,7 @@ def iniciar_tela(setor: str):
                     
                     lista_insert = []
                     for _, r in df_editado.iterrows():
-                        # Captura e converte usando a nova função ultra-segura
                         qtd_int = converter_para_int_seguro(r[loja_nome])
-                        
                         if qtd_int > 0:
                             lista_insert.append({
                                 "data_pedido": str(date.today()), 
@@ -216,7 +213,6 @@ def iniciar_tela(setor: str):
                                 "quantidade": qtd_int, 
                                 "usuario": usuario_atual
                             })
-                                
                     if lista_insert: 
                         supabase.table("pedidos").insert(lista_insert).execute()
             st.success("Alterações consolidadas com sucesso!"); st.rerun()
@@ -231,7 +227,7 @@ def iniciar_tela(setor: str):
         st.markdown(f"## 🥬 Lançamento de Pedidos — {loja_selecionada}")
         
         resp_prod = supabase.table("produtos").select("*").eq("setor", setor).eq("ativo", True).execute()
-        resp_perm = supabase.table("produtos_lojas").select("codigo_produto, disponivel").eq("loja", num_loja).eq("disponivel", True).execute()
+        resp_perm = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").eq("loja", num_loja).eq("disponivel", True).execute()
         resp_med = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
         resp_existente = supabase.table("pedidos").select("codigo_produto, quantidade, observacao").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
 
@@ -306,7 +302,6 @@ def iniciar_tela(setor: str):
                 lista_inserts = []
                 for _, r in grid_editado.iterrows():
                     qtd_int = converter_para_int_seguro(r["Qtde Pedida"])
-                    
                     if qtd_int > 0:
                         lista_inserts.append({
                             "data_pedido": str(date.today()), 
