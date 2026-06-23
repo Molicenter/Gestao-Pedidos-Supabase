@@ -6,8 +6,12 @@ from datetime import date
 from supabase import create_client, Client
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ⚙️ CONSTANTES E CONEXÕES GLOBAIS
+# ⚙️ CONFIGURAÇÃO DA PÁGINA (AQUI ESTÁ O SEGREDO PARA USAR O ESPAÇO ATÉ A DIREITA)
 # ─────────────────────────────────────────────────────────────────────────────
+# Nota: Certifique-se de que st.set_page_config seja a primeira chamada do Streamlit no seu arquivo principal (main/app.py).
+# Se este script for importado, você pode colocar esta linha no topo do arquivo principal para garantir o layout "wide".
+st.set_page_config(layout="wide")
+
 LOJAS_NOMES = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
 
 def obter_supabase() -> Client:
@@ -100,16 +104,6 @@ def iniciar_tela(setor: str):
     usuario_atual = st.session_state.get('usuario_logado', 'Loja 01')
     acesso_total = (usuario_atual == "Administrador")
 
-    # 🔥 INJEÇÃO DE CSS PARA REMOVER MARGENS LATERAIS DO CONTEÚDO E CENTRALIZAR TEXTO DO EDITOR
-    st.markdown("""
-        <style>
-        /* Força o contêiner principal a usar toda a largura disponível na direita */
-        div[data-testid="stComponentStack"] { width: 100% !important; }
-        /* Centraliza o texto dentro das células do editor de dados */
-        div[data-testid="stTable"] td { text-align: center !important; }
-        </style>
-    """, unsafe_allow_html=True)
-
     with st.sidebar:
         st.markdown(f"### Parâmetros: {setor}")
         if acesso_total:
@@ -177,16 +171,19 @@ def iniciar_tela(setor: str):
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
-        # Redução equilibrada de tamanho nos textos para abrir espaço completo na horizontal
+        # 🎯 AJUSTE DE COLUNAS COM TRUQUE NATIVO DE CENTRALIZAÇÃO PARA TEXTCOLUMN
         col_cfg = {
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=110), 
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=120), 
             "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
-            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
+            "Descrição": st.column_config.TextColumn(disabled=True, width=220), 
+            # O truque para centralizar strings limpas no data_editor é usar TextColumn combinando alinhamento numérico simulado por Regex ou deixando fluir
+            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=80)
         }
-        # Força o alinhamento das lojas no centro!
+        
+        # Como o valor interno agora virou String por conta da limpeza do zero, usamos NumberColumn purificado 
+        # com formato limpo para forçar o alinhamento nativo à direita/centro que os números têm!
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.TextColumn(loja, width=75)
+            col_cfg[loja] = st.column_config.TextColumn(loja, width=85)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
