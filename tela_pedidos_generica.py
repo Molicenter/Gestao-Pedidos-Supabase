@@ -57,7 +57,7 @@ def injetar_botao_impressao():
             box-sizing: border-box;
             height: 38px;
         ">
-            🖨 Honor / Imprimir
+            🖨️ Imprimir
         </button>
         """,
         height=42,
@@ -75,9 +75,9 @@ def exibir_status_digitacao_lojas(df_pedidos_hoje):
     for i, loja_nome in enumerate(LOJAS_NOMES):
         with cols[i]:
             if loja_nome in lojas_que_digitam:
-                st.markdown(f"<div style='text-align:center; background-color:#d4edda; color:#155724; padding:5px; border-radius:5px; font-size:12px; font-weight:bold;'>{loja_nome}<br>✅ OK</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='text-align:center; background-color:#d4edda; color:#155724; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>✅ OK</div>", unsafe_allow_html=True)
             else:
-                st.markdown(f"<div style='text-align:center; background-color:#f8d7da; color:#721c24; padding:5px; border-radius:5px; font-size:12px; font-weight:bold;'>{loja_nome}<br>❌ Faltando</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='text-align:center; background-color:#f8d7da; color:#721c24; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>❌ Faltando</div>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -139,27 +139,23 @@ def iniciar_tela(setor: str):
 
         df_consolidado = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
         
+        # Para sumir com o 'None', preenchemos com 0.0, mas formatamos o visual para esconder zeros se necessário
         for loja in LOJAS_NOMES:
-            if loja not in df_consolidado.columns: df_consolidado[loja] = None  # Altera de 0.0 para None para deixar a célula vazia!
-            # Substitui os NaN por None em vez de zero, mantendo limpo sem o número 0
-            df_consolidado[loja] = df_consolidado[loja].where(df_consolidado[loja].notna(), None)
+            df_consolidado[loja] = df_consolidado[loja].fillna(0.0)
 
-        # Calcula o TOTAL GERAL tratando os Nulos (None) temporariamente como zero para a soma matemática
-        df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].fillna(0.0).sum(axis=1)
-        # Se o total for zero, limpa também a coluna do total para não poluir
-        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0.0: None, 0: None})
-
+        df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
 
+        # Redução drástica das larguras das colunas para comprimir as 8 lojas na tela horizontal
         col_cfg = {
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width="medium"), 
-            "Código": st.column_config.NumberColumn(disabled=True, width="small"), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width="large"), 
-            "TOTAL GERAL": st.column_config.NumberColumn("TOTAL ▶️", disabled=True, width="small", format="%.2f")
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=100), 
+            "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"), 
+            "Descrição": st.column_config.TextColumn(disabled=True, width=180), 
+            "TOTAL GERAL": st.column_config.NumberColumn("TOTAL", disabled=True, width=70, format="%.2f")
         }
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.NumberColumn(loja, format="%.2f", min_value=0.0, width=80)
+            col_cfg[loja] = st.column_config.NumberColumn(loja, format="%.2f", min_value=0.0, width=65)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
@@ -187,7 +183,7 @@ def iniciar_tela(setor: str):
                     lista_insert = []
                     for _, r in df_editado.iterrows():
                         val_loja = r[loja_nome]
-                        if val_loja is not None and float(val_loja) > 0:
+                        if val_loja and float(val_loja) > 0:
                             lista_insert.append({
                                 "data_pedido": str(date.today()), "setor": setor, "loja": n_loja,
                                 "codigo_produto": int(r["Código"]), "quantidade": float(val_loja), "usuario": usuario_atual
@@ -224,12 +220,11 @@ def iniciar_tela(setor: str):
 
         if not df_existente.empty:
             df_loja = pd.merge(df_loja, df_existente, on='codigo_produto', how='left')
-            # Deixa nulo (None) se a quantidade for nula ou menor/igual a zero para sumir com os zeros da tela
-            df_loja['quantidade'] = df_loja['quantidade'].where(df_loja['quantidade'] > 0, None)
+            df_loja['quantidade'] = df_loja['quantidade'].fillna(0.0)
             df_loja['observacao'] = df_loja['observacao'].fillna("")
             itens_digitados = df_existente[df_existente['quantidade'] > 0].shape[0]
         else:
-            df_loja['quantidade'] = None  # Começa totalmente limpo sem os zeros
+            df_loja['quantidade'] = 0.0
             df_loja['observacao'] = ""
             itens_digitados = 0
 
@@ -246,12 +241,15 @@ def iniciar_tela(setor: str):
         }).sort_values(by='Descrição')
 
         col_cfg_l = {
-            "Fornecedor": st.column_config.TextColumn(disabled=True), "Código": st.column_config.NumberColumn(disabled=True, format="%d"), "Descrição": st.column_config.TextColumn(disabled=True),
-            "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d"), "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f"),
-            "Qtde Pedida": st.column_config.NumberColumn("Qtde Pedida", min_value=0.0, step=1.0, width=100), "Observação": st.column_config.TextColumn("Observação", max_chars=100)
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=120), 
+            "Código": st.column_config.NumberColumn(disabled=True, format="%d", width=70), 
+            "Descrição": st.column_config.TextColumn(disabled=True, width=250),
+            "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=90), 
+            "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f", width=90),
+            "Qtde Pedida": st.column_config.NumberColumn("Qtde Pedida", min_value=0.0, step=1.0, width=100, format="%.2f"), 
+            "Observação": st.column_config.TextColumn("Observação", max_chars=100, width=180)
         }
 
-        # 🚨 REMOVIDO O HEIGHT FIXO PARA A TABELA ABRIR COMPLETA ATÉ EMBAIXO!
         grid_editado = st.data_editor(df_final_grid, column_config=col_cfg_l, hide_index=True, use_container_width=True)
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
@@ -273,7 +271,6 @@ def iniciar_tela(setor: str):
             with st.spinner("Gravando no banco de dados relacional..."):
                 supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
                 
-                # Valida apenas linhas cujo valor inserido é maior que zero e não nulo
                 grid_editado['Qtde Pedida'] = grid_editado['Qtde Pedida'].fillna(0.0)
                 pedidos_linhas = grid_editado[grid_editado['Qtde Pedida'] > 0]
                 
@@ -309,12 +306,10 @@ def iniciar_tela(setor: str):
             
         df_mestre = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='inner').drop(columns=['codigo_produto'])
         
-        # Garante que qualquer número 0 ou 0.0 vire uma string perfeitamente vazia ""
         for l in LOJAS_NOMES: 
             if l not in df_mestre.columns: df_mestre[l] = ""
             else: df_mestre[l] = df_mestre[l].fillna(0).apply(lambda x: int(x) if x == int(x) else x).astype(str).replace({"0": "", "0.0": "", "nan": ""})
 
-        # Renderiza agrupado por Fornecedor na tela
         for forn in df_mestre["fornecedor"].dropna().unique():
             df_forn_view = df_mestre[df_mestre["fornecedor"] == forn][["codigo", "descricao"] + [col for col in LOJAS_NOMES if col in df_mestre.columns]].rename(columns={'codigo': 'Código', 'descricao': 'Produto'})
             with st.container(border=True):
@@ -322,7 +317,6 @@ def iniciar_tela(setor: str):
                 st.dataframe(df_forn_view, hide_index=True, use_container_width=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        # 🛠️ MOVIDO PARA BAIXO: LINHA UNIFICADA DE BOTÕES PARA COMPRADORES
         c_excel, c_print = st.columns([4, 1])
         with c_excel:
             dados_excel = gerar_excel_download(df_mestre, f"Fornecedores {setor}")
@@ -362,11 +356,19 @@ def iniciar_tela(setor: str):
         df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
         for l in LOJAS_NOMES: df_cat_completo[l] = df_cat_completo[l].fillna(True).astype(bool)
 
-        col_cfg_c = {"codigo": st.column_config.NumberColumn("Código", disabled=True, format="%d"), "descricao": st.column_config.TextColumn("Descrição do Produto", disabled=True), "fornecedor": st.column_config.TextColumn("Fornecedor/Marca")}
-        for l in LOJAS_NOMES: col_cfg_c[l] = st.column_config.CheckboxColumn(l)
+        col_cfg_c = {
+            "codigo": st.column_config.NumberColumn("Código", disabled=True, format="%d", width=70), 
+            "descricao": st.column_config.TextColumn("Descrição do Produto", disabled=True, width=220), 
+            "fornecedor": st.column_config.TextColumn("Fornecedor/Marca", width=120)
+        }
+        # Reduz as larguras das caixas de seleção das lojas para caber tudo sem rolagem horizontal
+        for l in LOJAS_NOMES: 
+            col_cfg_c[l] = st.column_config.CheckboxColumn(l, width=65)
 
+        # 🚨 REMOVIDO HEIGHT FIXO PARA ABRIR A BOX COMPLETAMENTE ATÉ EMBAIXO
         edited_cat = st.data_editor(df_cat_completo[["fornecedor", "codigo", "descricao"] + LOJAS_NOMES], use_container_width=True, hide_index=True, column_config=col_cfg_c)
 
+        st.markdown("<br>", unsafe_allow_html=True)
         if st.button("💾 Salvar Matriz do Catálogo", type="primary", use_container_width=True):
             with st.spinner("Atualizando regras de disponibilidade por loja..."):
                 lista_upserts_permissoes = []
