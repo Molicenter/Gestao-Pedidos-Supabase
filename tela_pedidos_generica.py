@@ -473,32 +473,44 @@ def iniciar_tela(setor: str):
             st.success("Pedido gravado instantaneamente no Supabase!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 3 — VISÃO FORNECEDORES (RESUMO EDITÁVEL)
+    # ROTA 3 — VISÃO FORNECEDORES (RESUMO EDITÁVEL CORRIGIDO)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Visão Fornecedores (Resumo)":
         st.markdown(f"## 🚚 Resumo Consolidado por Fornecedor — {setor}")
         
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
-        
         resp_perm_all = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").execute()
-        df_perm_all = pd.DataFrame(resp_perm_all.data)
         
         df_prod = pd.DataFrame(resp_prod.data)
         df_ped = pd.DataFrame(resp_ped.data)
+        df_perm_all = pd.DataFrame(resp_perm_all.data)
 
         if df_prod.empty:
-            st.info("Nenhum pedido realizado hoje para este setor até o momento.")
+            st.warning("Nenhum produto cadastrado no mestre para este setor.")
             return
 
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
-        df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
-        for n in range(1, 9):
-            if n in df_pivot.columns: df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
-            
-        df_mestre = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='inner').drop(columns=['codigo_produto', 'nome_personalizado'])
+        # Prevenção contra erro no Pivot se não houver pedidos
+        if not df_ped.empty:
+            df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
+            for n in range(1, 9):
+                if n in df_pivot.columns: df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
+        else:
+            df_pivot = pd.DataFrame(columns=['codigo_produto'])
+
+        df_mestre = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left')
+        if 'codigo_produto' in df_mestre.columns:
+            df_mestre = df_mestre.drop(columns=['codigo_produto'])
         
+        # Garante as colunas de lojas e converte para numérico
+        for loja in LOJAS_NOMES:
+            if loja not in df_mestre.columns:
+                df_mestre[loja] = 0.0
+            df_mestre[loja] = df_mestre[loja].fillna(0).astype(int)
+
+        # Matriz de Permissões
         if not df_perm_all.empty:
             df_perm_pivot = df_perm_all.pivot(index='codigo_produto', columns='loja', values='disponivel').reset_index()
             for n in range(1, 9):
@@ -514,27 +526,21 @@ def iniciar_tela(setor: str):
         mask_active = df_mestre[perm_cols].fillna(False).any(axis=1)
         df_mestre = df_mestre[mask_active]
         
-        for l in LOJAS_NOMES: 
-            if l not in df_mestre.columns: df_mestre[l] = ""
-            else: df_mestre[l] = df_mestre[l].fillna(0).apply(lambda x: int(x) if x == int(x) else x).astype(str).replace({"0": "", "0.0": "", "nan": ""})
-
-        df_mestre_total = df_mestre.copy()
-        for l in LOJAS_NOMES:
-            df_mestre_total[l] = df_mestre_total[l].replace({"": 0}).astype(int)
-        df_mestre["TOTAL_NUM"] = df_mestre_total[LOJAS_NOMES].sum(axis=1)
+        # Cálculo do Total ANTES de aplicar os traços de bloqueio
+        df_mestre["TOTAL_NUM"] = df_mestre[LOJAS_NOMES].sum(axis=1)
         df_mestre["TOTAL GERAL"] = df_mestre["TOTAL_NUM"].replace({0: ""})
 
-        for l in LOJAS_NOMES:
-            # Substitui células da loja por "-" caso não haja disponibilidade no catálogo
-            perm_col = f"{l}_perm"
+        # Aplica visualização de bloqueio ("-") e limpa os zeros das lojas
+        for loja in LOJAS_NOMES:
+            df_mestre[loja] = df_mestre[loja].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
+            perm_col = f"{loja}_perm"
             if perm_col in df_mestre.columns:
-                df_mestre.loc[df_mestre[perm_col] != True, l] = "-"
+                df_mestre.loc[df_mestre[perm_col] != True, loja] = "-"
 
         all_edited_frames = []
 
-        # Fornecedores já estão em ordem alfabética no Select
+        # Renderização segmentada e ordenada
         for forn in sorted(df_mestre["fornecedor"].dropna().unique()):
-            # ORDENAÇÃO AUTOMÁTICA dos Produtos do fornecedor atual
             df_forn_view = df_mestre[df_mestre["fornecedor"] == forn][["codigo", "descricao"] + LOJAS_NOMES + ["TOTAL GERAL"]].rename(columns={'codigo': 'Código', 'descricao': 'Produto'}).sort_values(by='Produto')
             
             with st.container(border=True):
@@ -582,7 +588,7 @@ def iniciar_tela(setor: str):
                             lista_insert = []
                             for _, r in df_forn_editado_full.iterrows():
                                 qtd_int = converter_para_int_seguro(r[loja_nome])
-                                if qtd_int > 0: # O traço "-" devolve zero, então o dado bloqueado é automaticamente ignorado aqui
+                                if qtd_int > 0:
                                     lista_insert.append({
                                         "data_pedido": str(date.today()), 
                                         "setor": setor, 
