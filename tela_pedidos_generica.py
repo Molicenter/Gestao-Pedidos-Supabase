@@ -256,7 +256,7 @@ def iniciar_tela(setor: str):
         df_consolidado["TOTAL_NUM"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
 
         # ---------------------------------------------------------------------
-        # NOVA SESSÃO: FILTRO E MÉTRICA LADO A LADO
+        # SESSÃO: FILTRO E MÉTRICA LADO A LADO
         # ---------------------------------------------------------------------
         st.markdown("<br>", unsafe_allow_html=True)
         col_filtro, col_metric = st.columns([3, 1])
@@ -349,7 +349,8 @@ def iniciar_tela(setor: str):
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor, nome_personalizado").eq("setor", setor).eq("ativo", True).execute()
         resp_perm = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").eq("loja", num_loja).eq("disponivel", True).execute()
         resp_med = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
-        resp_existente = supabase.table("pedidos").select("codigo_produto, quantidade, observacao").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
+        # Removido 'observacao' da query abaixo
+        resp_existente = supabase.table("pedidos").select("codigo_produto, quantidade").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
 
         df_prod = pd.DataFrame(resp_prod.data)
         df_perm = pd.DataFrame(resp_perm.data)
@@ -369,11 +370,9 @@ def iniciar_tela(setor: str):
         if not df_existente.empty:
             df_loja = pd.merge(df_loja, df_existente, on='codigo_produto', how='left')
             df_loja['quantidade'] = df_loja['quantidade'].fillna(0).astype(int)
-            df_loja['observacao'] = df_loja['observacao'].fillna("")
             itens_digitados = df_existente[df_existente['quantidade'] > 0].shape[0]
         else:
             df_loja['quantidade'] = 0
-            df_loja['observacao'] = ""
             itens_digitados = 0
 
         st.metric(label="📝 Seus Itens Preenchidos", value=f"{itens_digitados} produtos")
@@ -384,10 +383,11 @@ def iniciar_tela(setor: str):
 
         df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""})
 
+        # Removida a coluna Observação do DataFrame Final
         df_final_grid = pd.DataFrame({
             'Código': df_loja['codigo'], 'Fornecedor': df_loja['fornecedor'], 'Descrição': df_loja['descricao'],
             'Média (90d)': df_loja['media_dia'], 'Estoque ERP': df_loja['Estoque'],
-            'Qtde Pedida': df_loja['quantidade'], 'Observação': df_loja['observacao']
+            'Qtde Pedida': df_loja['quantidade']
         }).sort_values(by='Descrição')
 
         texto_busca = st.text_input("🔍 Buscar Produto (por Código ou Nome):", placeholder="Ex: Alface ou 12345")
@@ -407,8 +407,7 @@ def iniciar_tela(setor: str):
             "Descrição": st.column_config.TextColumn(disabled=True, width=250),
             "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=90), 
             "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f", width=90),
-            "Qtde Pedida": st.column_config.TextColumn("Qtde Pedida", width=100), 
-            "Observação": st.column_config.TextColumn("Observação", max_chars=100, width=180)
+            "Qtde Pedida": st.column_config.TextColumn("Qtde Pedida", width=100)
         }
 
         grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=True)
@@ -445,7 +444,6 @@ def iniciar_tela(setor: str):
                                 "loja": num_loja, 
                                 "codigo_produto": int(r["Código"]),
                                 "quantidade": qtd_int, 
-                                "observacao": str(r["Observação"]).strip() if pd.notna(r["Observação"]) and r["Observação"] else None, 
                                 "usuario": usuario_atual
                             })
                     if lista_inserts:
