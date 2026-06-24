@@ -30,7 +30,8 @@ def converter_para_int_seguro(valor) -> int:
     except ValueError:
         return 0
 
-@st.cache_data(ttl=30)
+# Removido o @st.cache_data para evitar conflito de cache.
+# O cache agora é gerenciado diretamente pela conexão do banco.
 def buscar_estoque_erp(loja_nome, codigos, setor):
     if not codigos: return pd.DataFrame(columns=["Código", "Estoque"])
     loja_id = int(loja_nome.split()[-1])
@@ -44,8 +45,12 @@ def buscar_estoque_erp(loja_nome, codigos, setor):
         SELECT cade_codigo AS "Código", {coluna_alvo} AS "Estoque"
         FROM python_estoque WHERE cade_codempresa = '{loja_id_str}' AND cade_codigo IN ({cods_str})
     """
-    try: return conn_pg.query(query)
-    except: return pd.DataFrame({"Código": codigos, "Estoque": 0})
+    try: 
+        # Cache ajustado para 30 segundos direto na engine do banco
+        return conn_pg.query(query, ttl=30) 
+    except Exception as e: 
+        st.error(f"Erro ao buscar estoque: {e}")
+        return pd.DataFrame({"Código": codigos, "Estoque": 0})
 
 def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
     output = io.BytesIO()
