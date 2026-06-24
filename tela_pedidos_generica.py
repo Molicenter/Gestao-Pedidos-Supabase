@@ -30,8 +30,6 @@ def converter_para_int_seguro(valor) -> int:
     except ValueError:
         return 0
 
-# Removido o @st.cache_data para evitar conflito de cache.
-# O cache agora é gerenciado diretamente pela conexão do banco.
 def buscar_estoque_erp(loja_nome, codigos, setor):
     if not codigos: return pd.DataFrame(columns=["Código", "Estoque"])
     loja_id = int(loja_nome.split()[-1])
@@ -138,6 +136,73 @@ def iniciar_tela(setor: str):
                 st.toast(f"Planilha de {setor} zerada com sucesso!", icon="🗑️")
                 time.sleep(1)
                 st.rerun()
+
+            # ─────────────────────────────────────────────────────────────────
+            # NOVO BLOCO: ATUALIZAÇÃO DINÂMICA DE MÉDIAS
+            # ─────────────────────────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("🔄 **Atualizar Médias (90d)**")
+            
+            # Dicionário de views disponíveis conforme a imagem do pgAdmin
+            dict_views = {
+                "Média Semanal": "python_90dSEMANA",
+                "Diária": "python_90dDIARIA",
+                "Seg-Ter": "python_90dSEGTER",
+                "Qua-Qui": "python_90dQUAQUI",
+                "Sex-Sab-Dom": "python_90dSEXSABDOM"
+            }
+            
+            view_escolhida = st.selectbox("Selecione o período base:", list(dict_views.keys()))
+            
+            if st.button("📥 Puxar Médias do ERP", type="primary", use_container_width=True):
+                view_sql = dict_views[view_escolhida]
+                with st.spinner(f"Sincronizando {view_sql}..."):
+                    try:
+                        # 1. Busca todos os códigos de produtos habilitados neste setor
+                        resp_prod = supabase.table("produtos").select("codigo").eq("setor", setor).execute()
+                        codigos_setor = [p["codigo"] for p in resp_prod.data]
+                        
+                        if not codigos_setor:
+                            st.warning("Nenhum produto cadastrado neste setor para atualizar as médias.")
+                        else:
+                            # 2. Busca a view direto do Postgres (ERP)
+                            df_erp = conn_pg.query(f"SELECT * FROM {view_sql}", ttl=0)
+                            
+                            if not df_erp.empty:
+                                # Captura nomes genéricos das colunas retornadas: Loja, Codigo, Média
+                                c_loja, c_cod, c_med = df_erp.columns[0], df_erp.columns[1], df_erp.columns[2]
+                                
+                                # 3. Isola apenas os dados de produtos pertencentes ao setor atual
+                                df_erp_setor = df_erp[df_erp[c_cod].isin(codigos_setor)]
+                                
+                                if df_erp_setor.empty:
+                                    st.info("A view retornou vazia para os produtos específicos deste setor.")
+                                else:
+                                    # 4. Deleta as médias velhas APENAS dos produtos deste setor 
+                                    # (feito em lotes para evitar estouro de limite da API)
+                                    for i in range(0, len(codigos_setor), 200):
+                                        supabase.table("medias_90d").delete().in_("codigo_produto", codigos_setor[i:i+200]).execute()
+                                    
+                                    # 5. Prepara a lista do Supabase
+                                    lista_insert = []
+                                    for _, row in df_erp_setor.iterrows():
+                                        lista_insert.append({
+                                            "loja": int(row[c_loja]),
+                                            "codigo_produto": int(row[c_cod]),
+                                            "media_dia": float(row[c_med]) if pd.notna(row[c_med]) else 0.0
+                                        })
+                                    
+                                    # 6. Insere os novos valores no banco do Supabase
+                                    for i in range(0, len(lista_insert), 1000):
+                                        supabase.table("medias_90d").insert(lista_insert[i:i+1000]).execute()
+                                        
+                                    st.success(f"Médias ({view_escolhida}) gravadas!")
+                                    time.sleep(1.5)
+                                    st.rerun()
+                            else:
+                                st.warning("A view do ERP retornou completamente vazia.")
+                    except Exception as e:
+                        st.error(f"Erro na sincronização: {e}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 1 — SEPARAÇÃO E FECHAMENTO (ADMIN)
