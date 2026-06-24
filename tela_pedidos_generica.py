@@ -139,7 +139,7 @@ def iniciar_tela(setor: str):
         else:
             perfil_navegacao = "Visão das Lojas"
 
-    # Alterado aqui: agora o menu administrativo completo aparece fixo para o Admin em qualquer tela
+    # Menu administrativo completo fixo para o Admin em qualquer visualização
     if acesso_total:
         with st.sidebar:
             st.markdown("---")
@@ -227,7 +227,7 @@ def iniciar_tela(setor: str):
             st.warning("Nenhum produto cadastrado para este setor.")
             return
 
-        # Aplica prioridade do nome personalizado
+        # Applies priority of personalized name
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
         exibir_status_digitacao_lojas(df_ped)
@@ -299,7 +299,7 @@ def iniciar_tela(setor: str):
                         if qtd_int > 0:
                             lista_insert.append({
                                 "data_pedido": str(date.today()), 
-                                "setor", setor, 
+                                "setor": setor, 
                                 "loja": n_loja,
                                 "codigo_produto": int(r["Código"]), 
                                 "quantidade": qtd_int, 
@@ -419,7 +419,7 @@ def iniciar_tela(setor: str):
                         if qtd_int > 0:
                             lista_inserts.append({
                                 "data_pedido": str(date.today()), 
-                                "setor", setor, 
+                                "setor": setor, 
                                 "loja": num_loja, 
                                 "codigo_produto": int(r["Código"]),
                                 "quantidade": qtd_int, 
