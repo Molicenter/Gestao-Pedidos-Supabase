@@ -31,13 +31,17 @@ def converter_para_int_seguro(valor) -> int:
         return 0
 
 @st.cache_data(ttl=30)
-def buscar_estoque_erp(loja_nome, codigos):
+def buscar_estoque_erp(loja_nome, codigos, setor):
     if not codigos: return pd.DataFrame(columns=["Código", "Estoque"])
     loja_id = int(loja_nome.split()[-1])
     loja_id_str = f"{loja_id:03d}" 
     cods_str = ", ".join(map(str, set(codigos)))
+    
+    # Define a coluna alvo com base no setor
+    coluna_alvo = "estoqueemb" if setor == "Embalagem" else "estoque"
+    
     query = f"""
-        SELECT cade_codigo AS "Código", estoque AS "Estoque"
+        SELECT cade_codigo AS "Código", {coluna_alvo} AS "Estoque"
         FROM python_estoque WHERE cade_codempresa = '{loja_id_str}' AND cade_codigo IN ({cods_str})
     """
     try: return conn_pg.query(query)
@@ -273,7 +277,7 @@ def iniciar_tela(setor: str):
 
         st.metric(label="📝 Seus Itens Preenchidos", value=f"{itens_digitados} produtos")
 
-        df_estoque = buscar_estoque_erp(loja_selecionada, df_loja["codigo"].tolist())
+        df_estoque = buscar_estoque_erp(loja_selecionada, df_loja["codigo"].tolist(), setor)
         df_loja = pd.merge(df_loja, df_estoque, left_on='codigo', right_on='Código', how='left')
         df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
 
