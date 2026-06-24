@@ -128,7 +128,7 @@ def iniciar_tela(setor: str):
         st.markdown(f"### Parâmetros: {setor}")
         if acesso_total:
             perfil_navegacao = st.radio("📍 Navegação Interna:", [
-                "Separação e Fechamento", "Visão das Lojas", "Visão Fornecedores (Resumo)", "Catálogo de Produtos"
+                "Visão Fornecedores (Resumo)", "Separação e Fechamento", "Visão das Lojas", "Catálogo de Produtos"
             ])
         else:
             perfil_navegacao = "Visão das Lojas"
