@@ -282,15 +282,9 @@ def iniciar_tela(setor: str):
             "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
         }
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.NumberColumn(loja, width=75, disabled=False, format="%d")
+            col_cfg[loja] = st.column_config.TextColumn(loja, width=75, disabled=False)
         
-        df_editado = st.data_editor(
-            df_exibicao, 
-            hide_index=True, 
-            use_container_width=True, 
-            height=500, 
-            column_config=col_cfg
-        )
+        df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
         with c_salvar:
