@@ -418,8 +418,8 @@ def iniciar_tela(setor: str):
         # Configuração das Colunas no Editor de Dados
         col_cfg_c = {
             "codigo": st.column_config.NumberColumn("Cód.", format="%d", width=70), 
-            "descricao": st.column_config.TextColumn("Nome Oficial (ERP)", width=220), 
-            "nome_personalizado": st.column_config.TextColumn("Nome Personalizado [Apelido]", width=220),
+            "descricao": st.column_config.TextColumn("Nome Prime", width=180), # Nome alterado e largura reduzida
+            "nome_personalizado": st.column_config.TextColumn("Nome Manual", width=160), # Nome alterado e largura reduzida
             "fornecedor": st.column_config.TextColumn("Fornecedor/Marca", width=130)
         }
         for l in LOJAS_NOMES: 
