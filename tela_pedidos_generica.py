@@ -235,7 +235,6 @@ def iniciar_tela(setor: str):
 
         exibir_status_digitacao_lojas(df_ped)
         
-        # Consolidação Inicial
         if not df_ped.empty:
             df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
             for n in range(1, 9):
@@ -252,32 +251,23 @@ def iniciar_tela(setor: str):
                 df_consolidado[loja] = 0.0
             df_consolidado[loja] = df_consolidado[loja].fillna(0).astype(int)
 
-        # Coluna numérica para cálculo matemático antes da formatação em texto
         df_consolidado["TOTAL_NUM"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
 
-        # ---------------------------------------------------------------------
-        # SESSÃO: FILTRO E MÉTRICA LADO A LADO
-        # ---------------------------------------------------------------------
         st.markdown("<br>", unsafe_allow_html=True)
         col_filtro, col_metric = st.columns([3, 1])
 
         with col_filtro:
-            # Coleta fornecedores/setores únicos cadastrados na base (ex: Box, Pedra)
             opcoes_forn = ["Todos"] + sorted([str(f) for f in df_prod['fornecedor'].unique() if pd.notna(f) and str(f).strip() != ""])
             filtro_selecionado = st.radio("🔍 Filtrar Exibição por Setor:", options=opcoes_forn, horizontal=True)
 
-        # Aplica o filtro se não for 'Todos'
         if filtro_selecionado != "Todos":
             df_consolidado = df_consolidado[df_consolidado['fornecedor'] == filtro_selecionado]
 
-        # Calcula a quantidade de itens que tiveram pedido com base APENAS no que sobrou do filtro
         itens_com_pedido = df_consolidado[df_consolidado["TOTAL_NUM"] > 0].shape[0]
 
         with col_metric:
             st.metric(label="📦 Itens c/ pedido", value=f"{itens_com_pedido} produtos")
-        # ---------------------------------------------------------------------
 
-        # Formatação final para exibição na grid (tirando zeros)
         df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL_NUM"].replace({0: ""})
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].replace({0: ""})
@@ -292,7 +282,7 @@ def iniciar_tela(setor: str):
             "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
         }
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.TextColumn(loja, width=75)
+            col_cfg[loja] = st.column_config.TextColumn(loja, width=75, disabled=False)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
@@ -315,7 +305,6 @@ def iniciar_tela(setor: str):
             with st.spinner("Atualizando registros de pedidos..."):
                 codigos_na_tela = df_editado["Código"].tolist()
                 
-                # Regra de Segurança Crítica: Deleta e Atualiza APENAS os códigos filtrados e exibidos na tela
                 if codigos_na_tela:
                     for loja_nome in LOJAS_NOMES:
                         n_loja = int(loja_nome.split()[-1])
@@ -349,7 +338,6 @@ def iniciar_tela(setor: str):
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor, nome_personalizado").eq("setor", setor).eq("ativo", True).execute()
         resp_perm = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").eq("loja", num_loja).eq("disponivel", True).execute()
         resp_med = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
-        # Removido 'observacao' da query abaixo
         resp_existente = supabase.table("pedidos").select("codigo_produto, quantidade").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
 
         df_prod = pd.DataFrame(resp_prod.data)
@@ -383,7 +371,6 @@ def iniciar_tela(setor: str):
 
         df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""})
 
-        # Removida a coluna Observação do DataFrame Final
         df_final_grid = pd.DataFrame({
             'Código': df_loja['codigo'], 'Fornecedor': df_loja['fornecedor'], 'Descrição': df_loja['descricao'],
             'Média (90d)': df_loja['media_dia'], 'Estoque ERP': df_loja['Estoque'],
@@ -452,7 +439,7 @@ def iniciar_tela(setor: str):
             st.success("Pedido gravado instantaneamente no Supabase!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 3 — VISÃO FORNECEDORES (RESUMO)
+    # ROTA 3 — VISÃO FORNECEDORES (RESUMO EDITÁVEL)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Visão Fornecedores (Resumo)":
         st.markdown(f"## 🚚 Resumo Consolidado por Fornecedor — {setor}")
@@ -475,29 +462,82 @@ def iniciar_tela(setor: str):
             
         df_mestre = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='inner').drop(columns=['codigo_produto', 'nome_personalizado'])
         
+        # Garante que todas as colunas de loja existam
         for l in LOJAS_NOMES: 
             if l not in df_mestre.columns: df_mestre[l] = ""
             else: df_mestre[l] = df_mestre[l].fillna(0).apply(lambda x: int(x) if x == int(x) else x).astype(str).replace({"0": "", "0.0": "", "nan": ""})
 
+        # Calcula o TOTAL
+        df_mestre_total = df_mestre.copy()
+        for l in LOJAS_NOMES:
+            df_mestre_total[l] = df_mestre_total[l].replace({"": 0}).astype(int)
+        df_mestre["TOTAL_NUM"] = df_mestre_total[LOJAS_NOMES].sum(axis=1)
+        df_mestre["TOTAL GERAL"] = df_mestre["TOTAL_NUM"].replace({0: ""})
+
+        all_edited_frames = []
+
+        # Renderiza data_editor dinâmico por fornecedor
         for forn in df_mestre["fornecedor"].dropna().unique():
-            df_forn_view = df_mestre[df_mestre["fornecedor"] == forn][["codigo", "descricao"] + [col for col in LOJAS_NOMES if col in df_mestre.columns]].rename(columns={'codigo': 'Código', 'descricao': 'Produto'})
+            df_forn_view = df_mestre[df_mestre["fornecedor"] == forn][["codigo", "descricao"] + LOJAS_NOMES + ["TOTAL GERAL"]].rename(columns={'codigo': 'Código', 'descricao': 'Produto'})
+            
             with st.container(border=True):
                 st.markdown(f"##### Fornecedor: {forn}")
-                st.dataframe(df_forn_view, hide_index=True, use_container_width=True)
+                
+                col_cfg_f = {
+                    "Código": st.column_config.NumberColumn(disabled=True, width=70, format="%d"),
+                    "Produto": st.column_config.TextColumn(disabled=True, width=200),
+                    "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
+                }
+                for l in LOJAS_NOMES:
+                    col_cfg_f[l] = st.column_config.TextColumn(l, width=75, disabled=False)
+                    
+                edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=True, column_config=col_cfg_f, key=f"editor_forn_{forn}")
+                all_edited_frames.append(edit_df)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        c_excel, c_print = st.columns([4, 1])
-        with c_excel:
-            dados_excel = gerar_excel_download(df_mestre, f"Fornecedores {setor}")
-            st.download_button(
-                label="📊 Exportar Fornecedores para Excel (.xlsx)",
-                data=dados_excel,
-                file_name=f"Resumo_Fornecedores_{setor}_{date.today()}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-        with c_print:
-            injetar_botao_impressao()
+        
+        if all_edited_frames:
+            # Consolida as mudanças feitas em todas as tabelas em um único DataFrame para salvar
+            df_forn_editado_full = pd.concat(all_edited_frames, ignore_index=True)
+            
+            c_salvar, c_excel, c_print = st.columns([2, 2, 1])
+            with c_salvar:
+                btn_salvar_forn = st.button("💾 Salvar Ajustes do Resumo", type="primary", use_container_width=True)
+            with c_excel:
+                dados_excel = gerar_excel_download(df_forn_editado_full, f"Fornecedores {setor}")
+                st.download_button(
+                    label="📊 Exportar Fornecedores (.xlsx)",
+                    data=dados_excel,
+                    file_name=f"Resumo_Fornecedores_{setor}_{date.today()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            with c_print:
+                injetar_botao_impressao()
+
+            if btn_salvar_forn:
+                with st.spinner("Atualizando registros via Visão Fornecedores..."):
+                    codigos_na_tela = df_forn_editado_full["Código"].tolist()
+                    if codigos_na_tela:
+                        for loja_nome in LOJAS_NOMES:
+                            n_loja = int(loja_nome.split()[-1])
+                            supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(date.today())).in_("codigo_produto", codigos_na_tela).execute()
+                            
+                            lista_insert = []
+                            for _, r in df_forn_editado_full.iterrows():
+                                qtd_int = converter_para_int_seguro(r[loja_nome])
+                                if qtd_int > 0:
+                                    lista_insert.append({
+                                        "data_pedido": str(date.today()), 
+                                        "setor": setor, 
+                                        "loja": n_loja,
+                                        "codigo_produto": int(r["Código"]), 
+                                        "quantidade": qtd_int, 
+                                        "usuario": usuario_atual
+                                    })
+                            if lista_insert: 
+                                supabase.table("pedidos").insert(lista_insert).execute()
+                st.success("Alterações de fornecedores consolidadas com sucesso!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 4 — CATÁLOGO DE PRODUTOS (TOTALMENTE EDITÁVEL)
@@ -547,8 +587,7 @@ def iniciar_tela(setor: str):
             hide_index=True, 
             column_config=col_cfg_c,
             num_rows="dynamic",
-            disabled=["codigo"],
-            key="catalogo_editor"
+            key="catalogo_editor" # Removido o 'disabled=["codigo"]'
         )
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -591,16 +630,39 @@ def iniciar_tela(setor: str):
                 if state and state.get("edited_rows"):
                     for idx_str, changes in state["edited_rows"].items():
                         idx = int(idx_str)
-                        cod_p = int(df_cat_completo.iloc[idx]["codigo"])
+                        cod_p_original = int(df_cat_completo.iloc[idx]["codigo"])
                         
                         prod_changes = {}
+                        if "codigo" in changes: prod_changes["codigo"] = int(changes["codigo"])
                         if "descricao" in changes: prod_changes["descricao"] = str(changes["descricao"])
                         if "fornecedor" in changes: prod_changes["fornecedor"] = str(changes["fornecedor"])
                         if "nome_personalizado" in changes: 
                             prod_changes["nome_personalizado"] = str(changes["nome_personalizado"]).strip() if changes["nome_personalizado"] else None
                         
                         if prod_changes:
-                            supabase.table("produtos").update(prod_changes).eq("codigo", cod_p).execute()
+                            # SE O CÓDIGO FOI ALTERADO, FAZEMOS UMA MIGRAÇÃO SEGURA PARA NÃO QUEBRAR O BANCO
+                            if "codigo" in changes:
+                                novo_cod = int(changes["codigo"])
+                                
+                                # 1. Puxa os dados completos do produto antigo
+                                orig_prod_req = supabase.table("produtos").select("*").eq("codigo", cod_p_original).execute()
+                                if orig_prod_req.data:
+                                    new_prod_data = orig_prod_req.data[0]
+                                    new_prod_data.update(prod_changes)
+                                    
+                                    # 2. Insere o produto clonado com o novo código
+                                    supabase.table("produtos").insert(new_prod_data).execute()
+                                    
+                                    # 3. Transfere os vínculos (pedidos, permissões, médias) do antigo para o novo
+                                    supabase.table("produtos_lojas").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
+                                    supabase.table("pedidos").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
+                                    supabase.table("medias_90d").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
+                                    
+                                    # 4. Exclui o produto antigo
+                                    supabase.table("produtos").delete().eq("codigo", cod_p_original).execute()
+                            else:
+                                # Se o código não mudou, apenas atualiza texto normal
+                                supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
                 lista_upserts_permissoes = []
                 for _, row in edited_cat.iterrows():
