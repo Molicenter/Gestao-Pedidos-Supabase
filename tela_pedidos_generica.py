@@ -107,13 +107,24 @@ def iniciar_tela(setor: str):
     usuario_atual = st.session_state.get('usuario_logado', 'Loja 01')
     acesso_total = (usuario_atual == "Administrador")
 
-    # 🔥 INJEÇÃO DE CSS PARA REMOVER MARGENS LATERAIS DO CONTEÚDO E CENTRALIZAR TEXTO DO EDITOR
+    # 🔥 INJEÇÃO DE CSS PARA CENTRALIZAÇÃO E BOTÃO VERMELHO
     st.markdown("""
         <style>
         /* Força o contêiner principal a usar toda a largura disponível na direita */
         div[data-testid="stComponentStack"] { width: 100% !important; }
         /* Centraliza o texto dentro das células do editor de dados */
         div[data-testid="stTable"] td { text-align: center !important; }
+        
+        /* Transforma APENAS o botão 'primary' da sidebar em vermelho vivo */
+        div[data-testid="stSidebar"] button[kind="primary"] {
+            background-color: #ff4b4b !important;
+            color: white !important;
+            border-color: #ff4b4b !important;
+        }
+        div[data-testid="stSidebar"] button[kind="primary"]:hover {
+            background-color: #ff3333 !important;
+            border-color: #ff3333 !important;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -129,21 +140,12 @@ def iniciar_tela(setor: str):
     if acesso_total and perfil_navegacao in ["Separação e Fechamento", "Visão Fornecedores (Resumo)"]:
         with st.sidebar:
             st.markdown("---")
-            st.markdown("⚠️ **Zona de Perigo (Admin)**")
-            if st.button("🗑️ Limpar Pedidos de Hoje", type="secondary", use_container_width=True):
-                with st.spinner("Limpando dados de hoje..."):
-                    supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(date.today())).execute()
-                st.toast(f"Planilha de {setor} zerada com sucesso!", icon="🗑️")
-                time.sleep(1)
-                st.rerun()
-
+            
             # ─────────────────────────────────────────────────────────────────
-            # NOVO BLOCO: ATUALIZAÇÃO DINÂMICA DE MÉDIAS
+            # BLOCO 1: ATUALIZAÇÃO DINÂMICA DE MÉDIAS
             # ─────────────────────────────────────────────────────────────────
-            st.markdown("---")
             st.markdown("🔄 **Atualizar Médias (90d)**")
             
-            # Dicionário de views disponíveis conforme a imagem do pgAdmin
             dict_views = {
                 "Média Semanal": "python_90dSEMANA",
                 "Diária": "python_90dDIARIA",
@@ -152,38 +154,30 @@ def iniciar_tela(setor: str):
                 "Sex-Sab-Dom": "python_90dSEXSABDOM"
             }
             
-            view_escolhida = st.selectbox("Selecione o período base:", list(dict_views.keys()))
+            view_escolhida = st.selectbox("Selecione o período base:", list(dict_views.keys()), label_visibility="collapsed")
             
-            if st.button("📥 Puxar Médias do ERP", type="primary", use_container_width=True):
+            if st.button("📥 Puxar Médias do ERP", type="secondary", use_container_width=True):
                 view_sql = dict_views[view_escolhida]
                 with st.spinner(f"Sincronizando {view_sql}..."):
                     try:
-                        # 1. Busca todos os códigos de produtos habilitados neste setor
                         resp_prod = supabase.table("produtos").select("codigo").eq("setor", setor).execute()
                         codigos_setor = [p["codigo"] for p in resp_prod.data]
                         
                         if not codigos_setor:
                             st.warning("Nenhum produto cadastrado neste setor para atualizar as médias.")
                         else:
-                            # 2. Busca a view direto do Postgres (ERP)
                             df_erp = conn_pg.query(f"SELECT * FROM {view_sql}", ttl=0)
                             
                             if not df_erp.empty:
-                                # Captura nomes genéricos das colunas retornadas: Loja, Codigo, Média
                                 c_loja, c_cod, c_med = df_erp.columns[0], df_erp.columns[1], df_erp.columns[2]
-                                
-                                # 3. Isola apenas os dados de produtos pertencentes ao setor atual
                                 df_erp_setor = df_erp[df_erp[c_cod].isin(codigos_setor)]
                                 
                                 if df_erp_setor.empty:
                                     st.info("A view retornou vazia para os produtos específicos deste setor.")
                                 else:
-                                    # 4. Deleta as médias velhas APENAS dos produtos deste setor 
-                                    # (feito em lotes para evitar estouro de limite da API)
                                     for i in range(0, len(codigos_setor), 200):
                                         supabase.table("medias_90d").delete().in_("codigo_produto", codigos_setor[i:i+200]).execute()
                                     
-                                    # 5. Prepara a lista do Supabase
                                     lista_insert = []
                                     for _, row in df_erp_setor.iterrows():
                                         lista_insert.append({
@@ -192,7 +186,6 @@ def iniciar_tela(setor: str):
                                             "media_dia": float(row[c_med]) if pd.notna(row[c_med]) else 0.0
                                         })
                                     
-                                    # 6. Insere os novos valores no banco do Supabase
                                     for i in range(0, len(lista_insert), 1000):
                                         supabase.table("medias_90d").insert(lista_insert[i:i+1000]).execute()
                                         
@@ -203,6 +196,17 @@ def iniciar_tela(setor: str):
                                 st.warning("A view do ERP retornou completamente vazia.")
                     except Exception as e:
                         st.error(f"Erro na sincronização: {e}")
+
+            # ─────────────────────────────────────────────────────────────────
+            # BLOCO 2: LIMPAR PEDIDOS (Destacado no Fim)
+            # ─────────────────────────────────────────────────────────────────
+            st.markdown("---")
+            if st.button("🗑️ Limpar Pedidos de Hoje", type="primary", use_container_width=True):
+                with st.spinner("Limpando dados de hoje..."):
+                    supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(date.today())).execute()
+                st.toast(f"Planilha de {setor} zerada com sucesso!", icon="🗑️")
+                time.sleep(1)
+                st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 1 — SEPARAÇÃO E FECHAMENTO (ADMIN)
