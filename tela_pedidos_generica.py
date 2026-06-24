@@ -333,7 +333,7 @@ def iniciar_tela(setor: str):
         loja_selecionada = st.selectbox("👁️ Visualizar como:", LOJAS_NOMES) if acesso_total else usuario_atual
         num_loja = int(loja_selecionada.split()[-1])
 
-        st.markdown(f"## 🥬 Lançamento de Pedidos — {loja_selecionada}")
+        st.markdown(f"## 📦 Lançamento de Pedidos — {loja_selecionada}")
         
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor, nome_personalizado").eq("setor", setor).eq("ativo", True).execute()
         resp_perm = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").eq("loja", num_loja).eq("disponivel", True).execute()
