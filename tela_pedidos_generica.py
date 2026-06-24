@@ -128,7 +128,10 @@ def iniciar_tela(setor: str):
         st.markdown(f"### Parâmetros: {setor}")
         if acesso_total:
             perfil_navegacao = st.radio("📍 Navegação Interna:", [
-                "Visão Fornecedores (Resumo)", "Separação e Fechamento", "Visão das Lojas", "Catálogo de Produtos"
+                "Visão Fornecedores (Resumo)",
+                "Separação e Fechamento", 
+                "Visão das Lojas", 
+                "Catálogo de Produtos"
             ])
         else:
             perfil_navegacao = "Visão das Lojas"
@@ -268,9 +271,10 @@ def iniciar_tela(setor: str):
         with col_metric:
             st.metric(label="📦 Itens c/ pedido", value=f"{itens_com_pedido} produtos")
 
+        # Conversão para texto visando facilitar a edição no data_editor sem conflito com None/NaN
         df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL_NUM"].replace({0: ""})
         for loja in LOJAS_NOMES:
-            df_consolidado[loja] = df_consolidado[loja].replace({0: ""})
+            df_consolidado[loja] = df_consolidado[loja].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
 
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
@@ -281,6 +285,8 @@ def iniciar_tela(setor: str):
             "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
             "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
         }
+        
+        # Uso do TextColumn evita o bloqueio por conta do formato numérico vazio
         for loja in LOJAS_NOMES: 
             col_cfg[loja] = st.column_config.TextColumn(loja, width=75, disabled=False)
         
@@ -333,7 +339,7 @@ def iniciar_tela(setor: str):
         loja_selecionada = st.selectbox("👁️ Visualizar como:", LOJAS_NOMES) if acesso_total else usuario_atual
         num_loja = int(loja_selecionada.split()[-1])
 
-        st.markdown(f"## 📦 Lançamento de Pedidos — {loja_selecionada}")
+        st.markdown(f"## 🥬 Lançamento de Pedidos — {loja_selecionada}")
         
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor, nome_personalizado").eq("setor", setor).eq("ativo", True).execute()
         resp_perm = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").eq("loja", num_loja).eq("disponivel", True).execute()
@@ -462,12 +468,10 @@ def iniciar_tela(setor: str):
             
         df_mestre = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='inner').drop(columns=['codigo_produto', 'nome_personalizado'])
         
-        # Garante que todas as colunas de loja existam
         for l in LOJAS_NOMES: 
             if l not in df_mestre.columns: df_mestre[l] = ""
             else: df_mestre[l] = df_mestre[l].fillna(0).apply(lambda x: int(x) if x == int(x) else x).astype(str).replace({"0": "", "0.0": "", "nan": ""})
 
-        # Calcula o TOTAL
         df_mestre_total = df_mestre.copy()
         for l in LOJAS_NOMES:
             df_mestre_total[l] = df_mestre_total[l].replace({"": 0}).astype(int)
@@ -476,7 +480,6 @@ def iniciar_tela(setor: str):
 
         all_edited_frames = []
 
-        # Renderiza data_editor dinâmico por fornecedor
         for forn in df_mestre["fornecedor"].dropna().unique():
             df_forn_view = df_mestre[df_mestre["fornecedor"] == forn][["codigo", "descricao"] + LOJAS_NOMES + ["TOTAL GERAL"]].rename(columns={'codigo': 'Código', 'descricao': 'Produto'})
             
@@ -497,7 +500,6 @@ def iniciar_tela(setor: str):
         st.markdown("<br>", unsafe_allow_html=True)
         
         if all_edited_frames:
-            # Consolida as mudanças feitas em todas as tabelas em um único DataFrame para salvar
             df_forn_editado_full = pd.concat(all_edited_frames, ignore_index=True)
             
             c_salvar, c_excel, c_print = st.columns([2, 2, 1])
@@ -540,21 +542,17 @@ def iniciar_tela(setor: str):
                 st.success("Alterações de fornecedores consolidadas com sucesso!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 4 — CATÁLOGO DE PRODUTOS (TOTALMENTE EDITÁVEL)
+    # ROTA 4 — CATÁLOGO DE PRODUTOS (COM MIGRAÇÃO SEGURA)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Catálogo de Produtos":
-        st.markdown(f"## 🗂️ Gestão de Catálogo e Permissões por Loja — {setor}")
+        st.markdown(f"## 🗂️ Gestão de Catálogo — {setor}")
 
         resp_prod = supabase.table("produtos").select("*").eq("setor", setor).execute()
-        resp_perm = supabase.table("produtos_lojas").select("*").execute()
-
         df_prod = pd.DataFrame(resp_prod.data)
+        
+        resp_perm = supabase.table("produtos_lojas").select("*").execute()
         df_perm = pd.DataFrame(resp_perm.data)
-
-        if df_prod.empty:
-            st.warning("Nenhum produto cadastrado no mestre para este setor.")
-            return
-
+        
         if not df_perm.empty:
             df_perm_pivot = df_perm.pivot(index='codigo_produto', columns='loja', values='disponivel').reset_index()
             for n in range(1, 9):
@@ -562,48 +560,45 @@ def iniciar_tela(setor: str):
         else:
             df_perm_pivot = pd.DataFrame(columns=['codigo_produto'] + LOJAS_NOMES)
 
-        df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
-        for l in LOJAS_NOMES: df_cat_completo[l] = df_cat_completo[l].fillna(True).astype(bool)
-        
-        if 'nome_personalizado' not in df_cat_completo.columns:
-            df_cat_completo['nome_personalizado'] = ""
+        # Trata caso a tabela de produtos esteja vazia
+        if df_prod.empty:
+            df_cat_completo = pd.DataFrame(columns=['codigo', 'descricao', 'nome_personalizado', 'fornecedor'] + LOJAS_NOMES)
         else:
-            df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
+            df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'], errors='ignore')
+            for l in LOJAS_NOMES: df_cat_completo[l] = df_cat_completo[l].fillna(True).astype(bool)
 
         col_cfg_c = {
             "codigo": st.column_config.NumberColumn("Cód.", format="%d", width=70), 
-            "descricao": st.column_config.TextColumn("Nome Prime", width=180), 
-            "nome_personalizado": st.column_config.TextColumn("Nome Manual", width=160),
-            "fornecedor": st.column_config.TextColumn("Fornecedor/Marca", width=130)
+            "descricao": st.column_config.TextColumn("Nome", width=200), 
+            "fornecedor": st.column_config.TextColumn("Fornecedor", width=130),
+            "nome_personalizado": st.column_config.TextColumn("Nome Manual", width=160)
         }
-        for l in LOJAS_NOMES: 
-            col_cfg_c[l] = st.column_config.CheckboxColumn(l)
+        for l in LOJAS_NOMES: col_cfg_c[l] = st.column_config.CheckboxColumn(l, default=True)
 
         colunas_exibicao = ["fornecedor", "codigo", "descricao", "nome_personalizado"] + LOJAS_NOMES
+        
+        # Garante que as colunas existem mesmo se DataFrame for vazio
+        for col in colunas_exibicao:
+            if col not in df_cat_completo.columns:
+                df_cat_completo[col] = None
 
         edited_cat = st.data_editor(
             df_cat_completo[colunas_exibicao], 
-            use_container_width=True, 
-            hide_index=True, 
-            column_config=col_cfg_c,
-            num_rows="dynamic",
-            key="catalogo_editor" # Removido o 'disabled=["codigo"]'
+            use_container_width=True, hide_index=True, column_config=col_cfg_c,
+            num_rows="dynamic", key="catalogo_editor"
         )
 
         st.markdown("<br>", unsafe_allow_html=True)
-        
         col_btn_salvar, col_btn_erp = st.columns(2)
         
         with col_btn_salvar:
-            btn_salvar = st.button("💾 Salvar Matriz do Catálogo", type="primary", use_container_width=True)
-            
+            btn_salvar = st.button("💾 Salvar Alterações e Migrar Códigos", type="primary", use_container_width=True)
         with col_btn_erp:
             btn_puxar_erp = st.button("📥 Puxar Nomes do ERP", use_container_width=True)
 
         if btn_salvar:
             state = st.session_state.get("catalogo_editor")
-            
-            with st.spinner("Sincronizando modificações com o Supabase..."):
+            with st.spinner("Processando..."):
                 if state and state.get("deleted_rows"):
                     for idx in state["deleted_rows"]:
                         cod_p = int(df_cat_completo.iloc[idx]["codigo"])
@@ -632,38 +627,47 @@ def iniciar_tela(setor: str):
                         idx = int(idx_str)
                         cod_p_original = int(df_cat_completo.iloc[idx]["codigo"])
                         
+                        # Extrai de forma segura as alterações feitas
                         prod_changes = {}
-                        if "codigo" in changes: prod_changes["codigo"] = int(changes["codigo"])
                         if "descricao" in changes: prod_changes["descricao"] = str(changes["descricao"])
                         if "fornecedor" in changes: prod_changes["fornecedor"] = str(changes["fornecedor"])
                         if "nome_personalizado" in changes: 
                             prod_changes["nome_personalizado"] = str(changes["nome_personalizado"]).strip() if changes["nome_personalizado"] else None
-                        
-                        if prod_changes:
-                            # SE O CÓDIGO FOI ALTERADO, FAZEMOS UMA MIGRAÇÃO SEGURA PARA NÃO QUEBRAR O BANCO
-                            if "codigo" in changes:
-                                novo_cod = int(changes["codigo"])
+
+                        if "codigo" in changes:
+                            novo_cod = int(changes["codigo"])
+                            
+                            # Puxa informações antigas para clonar corretamente
+                            orig_prod_req = supabase.table("produtos").select("*").eq("codigo", cod_p_original).execute()
+                            if orig_prod_req.data:
+                                old_data = orig_prod_req.data[0]
                                 
-                                # 1. Puxa os dados completos do produto antigo
-                                orig_prod_req = supabase.table("produtos").select("*").eq("codigo", cod_p_original).execute()
-                                if orig_prod_req.data:
-                                    new_prod_data = orig_prod_req.data[0]
-                                    new_prod_data.update(prod_changes)
-                                    
-                                    # 2. Insere o produto clonado com o novo código
-                                    supabase.table("produtos").insert(new_prod_data).execute()
-                                    
-                                    # 3. Transfere os vínculos (pedidos, permissões, médias) do antigo para o novo
-                                    supabase.table("produtos_lojas").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
-                                    supabase.table("pedidos").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
-                                    supabase.table("medias_90d").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
-                                    
-                                    # 4. Exclui o produto antigo
-                                    supabase.table("produtos").delete().eq("codigo", cod_p_original).execute()
-                            else:
-                                # Se o código não mudou, apenas atualiza texto normal
+                                # Monta o novo dicionário limpo (sem colunas internas como id)
+                                new_prod_data = {
+                                    "codigo": novo_cod,
+                                    "descricao": str(prod_changes.get("descricao", old_data.get("descricao"))),
+                                    "fornecedor": str(prod_changes.get("fornecedor", old_data.get("fornecedor"))),
+                                    "nome_personalizado": prod_changes.get("nome_personalizado", old_data.get("nome_personalizado")),
+                                    "setor": old_data.get("setor"),
+                                    "ativo": old_data.get("ativo", True)
+                                }
+                                
+                                # 1. Insere novo produto
+                                supabase.table("produtos").insert(new_prod_data).execute()
+                                
+                                # 2. Migra vínculos de outras tabelas
+                                supabase.table("produtos_lojas").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
+                                supabase.table("pedidos").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
+                                supabase.table("medias_90d").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
+                                
+                                # 3. Deleta o produto antigo
+                                supabase.table("produtos").delete().eq("codigo", cod_p_original).execute()
+                        else:
+                            # Se não mudou o código, faz atualização simples
+                            if prod_changes:
                                 supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
+                # Atualiza permissões de loja para as linhas (novas ou não)
                 lista_upserts_permissoes = []
                 for _, row in edited_cat.iterrows():
                     if pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "": 
@@ -681,7 +685,7 @@ def iniciar_tela(setor: str):
                 if lista_upserts_permissoes:
                     supabase.table("produtos_lojas").upsert(lista_upserts_permissoes, on_conflict="codigo_produto, loja").execute()
 
-            st.success("Painel do catálogo totalmente atualizado no Supabase!")
+            st.success("Tudo sincronizado no Supabase!")
             st.rerun()
 
         if btn_puxar_erp:
