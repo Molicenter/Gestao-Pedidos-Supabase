@@ -169,7 +169,8 @@ def iniciar_tela(setor: str):
                         if not codigos_setor:
                             st.warning("Nenhum produto cadastrado neste setor para atualizar as médias.")
                         else:
-                            df_erp = conn_pg.query(f"SELECT * FROM {view_sql}", ttl=0)
+                            # CORREÇÃO AQUI: Adicionado aspas duplas para o Postgres respeitar letras maiúsculas
+                            df_erp = conn_pg.query(f'SELECT * FROM "{view_sql}"', ttl=0)
                             
                             if not df_erp.empty:
                                 c_loja, c_cod, c_med = df_erp.columns[0], df_erp.columns[1], df_erp.columns[2]
@@ -201,15 +202,35 @@ def iniciar_tela(setor: str):
                         st.error(f"Erro na sincronização: {e}")
 
             # ─────────────────────────────────────────────────────────────────
-            # BLOCO 2: LIMPAR PEDIDOS (Destacado em vermelho no final)
+            # BLOCO 2: LIMPAR PEDIDOS (Com Confirmação)
             # ─────────────────────────────────────────────────────────────────
             st.markdown("---")
-            if st.button("🗑️ Limpar Pedidos de Hoje", type="primary", use_container_width=True):
-                with st.spinner("Limpando dados de hoje..."):
-                    supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(date.today())).execute()
-                st.toast(f"Planilha de {setor} zerada com sucesso!", icon="🗑️")
-                time.sleep(1)
-                st.rerun()
+            
+            # Controle de estado para exibir botões de confirmação
+            if 'confirmar_limpeza' not in st.session_state:
+                st.session_state['confirmar_limpeza'] = False
+                
+            if not st.session_state['confirmar_limpeza']:
+                if st.button("🗑️ Limpar Pedidos de Hoje", type="primary", use_container_width=True):
+                    st.session_state['confirmar_limpeza'] = True
+                    st.rerun()
+            else:
+                st.warning("⚠️ **Confirma a exclusão de todos os pedidos de hoje para este setor?**")
+                col_sim, col_nao = st.columns(2)
+                
+                with col_sim:
+                    if st.button("✔️ Sim", type="primary", use_container_width=True):
+                        with st.spinner("Limpando dados de hoje..."):
+                            supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(date.today())).execute()
+                        st.session_state['confirmar_limpeza'] = False
+                        st.toast(f"Planilha de {setor} zerada com sucesso!", icon="🗑️")
+                        time.sleep(1)
+                        st.rerun()
+                        
+                with col_nao:
+                    if st.button("❌ Não", use_container_width=True):
+                        st.session_state['confirmar_limpeza'] = False
+                        st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 1 — SEPARAÇÃO E FECHAMENTO (ADMIN)
@@ -227,7 +248,7 @@ def iniciar_tela(setor: str):
             st.warning("Nenhum produto cadastrado para este setor.")
             return
 
-        # Applies priority of personalized name
+        # Aplica prioridade do nome personalizado
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
         exibir_status_digitacao_lojas(df_ped)
