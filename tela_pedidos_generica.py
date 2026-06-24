@@ -36,7 +36,6 @@ def buscar_estoque_erp(loja_nome, codigos, setor):
     loja_id_str = f"{loja_id:03d}" 
     cods_str = ", ".join(map(str, set(codigos)))
     
-    # Define a coluna alvo com base no setor
     coluna_alvo = "estoqueemb" if setor == "Embalagem" else "estoque"
     
     query = f"""
@@ -44,7 +43,6 @@ def buscar_estoque_erp(loja_nome, codigos, setor):
         FROM python_estoque WHERE cade_codempresa = '{loja_id_str}' AND cade_codigo IN ({cods_str})
     """
     try: 
-        # Cache ajustado para 30 segundos direto na engine do banco
         return conn_pg.query(query, ttl=30) 
     except Exception as e: 
         st.error(f"Erro ao buscar estoque: {e}")
@@ -107,15 +105,11 @@ def iniciar_tela(setor: str):
     usuario_atual = st.session_state.get('usuario_logado', 'Loja 01')
     acesso_total = (usuario_atual == "Administrador")
 
-    # 🔥 INJEÇÃO DE CSS PARA CENTRALIZAÇÃO E FORÇAR BOTÃO VERMELHO NA SIDEBAR
     st.markdown("""
         <style>
-        /* Força o contêiner principal a usar toda a largura disponível na direita */
         div[data-testid="stComponentStack"] { width: 100% !important; }
-        /* Centraliza o texto dentro das células do editor de dados */
         div[data-testid="stTable"] td { text-align: center !important; }
         
-        /* Alvo robusto para transformar APENAS o botão 'primary' da sidebar em vermelho */
         [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"],
         [data-testid="stSidebar"] button[kind="primary"] {
             background-color: #ff4b4b !important;
@@ -139,14 +133,9 @@ def iniciar_tela(setor: str):
         else:
             perfil_navegacao = "Visão das Lojas"
 
-    # Menu administrativo completo fixo para o Admin em qualquer visualização
     if acesso_total:
         with st.sidebar:
             st.markdown("---")
-            
-            # ─────────────────────────────────────────────────────────────────
-            # BLOCO 1: ATUALIZAÇÃO DINÂMICA DE MÉDIAS
-            # ─────────────────────────────────────────────────────────────────
             st.markdown("🔄 **Atualizar Médias (90d)**")
             
             dict_views = {
@@ -169,7 +158,6 @@ def iniciar_tela(setor: str):
                         if not codigos_setor:
                             st.warning("Nenhum produto cadastrado neste setor para atualizar as médias.")
                         else:
-                            # CORREÇÃO AQUI: Adicionado aspas duplas para o Postgres respeitar letras maiúsculas
                             df_erp = conn_pg.query(f'SELECT * FROM "{view_sql}"', ttl=0)
                             
                             if not df_erp.empty:
@@ -201,12 +189,7 @@ def iniciar_tela(setor: str):
                     except Exception as e:
                         st.error(f"Erro na sincronização: {e}")
 
-            # ─────────────────────────────────────────────────────────────────
-            # BLOCO 2: LIMPAR PEDIDOS (Com Confirmação)
-            # ─────────────────────────────────────────────────────────────────
             st.markdown("---")
-            
-            # Controle de estado para exibir botões de confirmação
             if 'confirmar_limpeza' not in st.session_state:
                 st.session_state['confirmar_limpeza'] = False
                 
@@ -248,36 +231,56 @@ def iniciar_tela(setor: str):
             st.warning("Nenhum produto cadastrado para este setor.")
             return
 
-        # Aplica prioridade do nome personalizado
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
         exibir_status_digitacao_lojas(df_ped)
         
+        # Consolidação Inicial
         if not df_ped.empty:
             df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
             for n in range(1, 9):
                 if n in df_pivot.columns: df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
-            itens_com_pedido = df_pivot.shape[0]
         else:
             df_pivot = pd.DataFrame(columns=['codigo_produto'])
-            itens_com_pedido = 0
 
-        st.metric(label="📦 Total de Itens Solicitados Hoje", value=f"{itens_com_pedido} produtos")
-
-        for loja in LOJAS_NOMES:
-            if loja not in df_pivot.columns:
-                df_pivot[loja] = 0.0
-
-        df_consolidado = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'])
+        df_consolidado = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left')
+        if 'codigo_produto' in df_consolidado.columns:
+            df_consolidado = df_consolidado.drop(columns=['codigo_produto'])
         
         for loja in LOJAS_NOMES:
+            if loja not in df_consolidado.columns:
+                df_consolidado[loja] = 0.0
             df_consolidado[loja] = df_consolidado[loja].fillna(0).astype(int)
 
-        df_consolidado["TOTAL GERAL"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
-        
+        # Coluna numérica para cálculo matemático antes da formatação em texto
+        df_consolidado["TOTAL_NUM"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
+
+        # ---------------------------------------------------------------------
+        # NOVA SESSÃO: FILTRO E MÉTRICA LADO A LADO
+        # ---------------------------------------------------------------------
+        st.markdown("<br>", unsafe_allow_html=True)
+        col_filtro, col_metric = st.columns([3, 1])
+
+        with col_filtro:
+            # Coleta fornecedores/setores únicos cadastrados na base (ex: Box, Pedra)
+            opcoes_forn = ["Todos"] + sorted([str(f) for f in df_prod['fornecedor'].unique() if pd.notna(f) and str(f).strip() != ""])
+            filtro_selecionado = st.radio("🔍 Filtrar Exibição por Setor:", options=opcoes_forn, horizontal=True)
+
+        # Aplica o filtro se não for 'Todos'
+        if filtro_selecionado != "Todos":
+            df_consolidado = df_consolidado[df_consolidado['fornecedor'] == filtro_selecionado]
+
+        # Calcula a quantidade de itens que tiveram pedido com base APENAS no que sobrou do filtro
+        itens_com_pedido = df_consolidado[df_consolidado["TOTAL_NUM"] > 0].shape[0]
+
+        with col_metric:
+            st.metric(label="📦 Itens c/ pedido", value=f"{itens_com_pedido} produtos")
+        # ---------------------------------------------------------------------
+
+        # Formatação final para exibição na grid (tirando zeros)
+        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL_NUM"].replace({0: ""})
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].replace({0: ""})
-        df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL GERAL"].replace({0: ""})
 
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by='Descrição')
@@ -297,11 +300,11 @@ def iniciar_tela(setor: str):
         with c_salvar:
             btn_salvar = st.button("💾 Salvar Ajustes Administrativos", type="primary", use_container_width=True)
         with c_excel:
-            dados_excel = gerar_excel_download(df_editado, f"Fechamento {setor}")
+            dados_excel = gerar_excel_download(df_editado, f"Fechamento {setor} - {filtro_selecionado}")
             st.download_button(
                 label="📊 Exportar Excel (.xlsx)",
                 data=dados_excel,
-                file_name=f"Separacao_Fechamento_{setor}_{date.today()}.xlsx",
+                file_name=f"Separacao_Fechamento_{setor}_{filtro_selecionado}_{date.today()}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
@@ -310,24 +313,28 @@ def iniciar_tela(setor: str):
             
         if btn_salvar:
             with st.spinner("Atualizando registros de pedidos..."):
-                for loja_nome in LOJAS_NOMES:
-                    n_loja = int(loja_nome.split()[-1])
-                    supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(date.today())).execute()
-                    
-                    lista_insert = []
-                    for _, r in df_editado.iterrows():
-                        qtd_int = converter_para_int_seguro(r[loja_nome])
-                        if qtd_int > 0:
-                            lista_insert.append({
-                                "data_pedido": str(date.today()), 
-                                "setor": setor, 
-                                "loja": n_loja,
-                                "codigo_produto": int(r["Código"]), 
-                                "quantidade": qtd_int, 
-                                "usuario": usuario_atual
-                            })
-                    if lista_insert: 
-                        supabase.table("pedidos").insert(lista_insert).execute()
+                codigos_na_tela = df_editado["Código"].tolist()
+                
+                # Regra de Segurança Crítica: Deleta e Atualiza APENAS os códigos filtrados e exibidos na tela
+                if codigos_na_tela:
+                    for loja_nome in LOJAS_NOMES:
+                        n_loja = int(loja_nome.split()[-1])
+                        supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(date.today())).in_("codigo_produto", codigos_na_tela).execute()
+                        
+                        lista_insert = []
+                        for _, r in df_editado.iterrows():
+                            qtd_int = converter_para_int_seguro(r[loja_nome])
+                            if qtd_int > 0:
+                                lista_insert.append({
+                                    "data_pedido": str(date.today()), 
+                                    "setor": setor, 
+                                    "loja": n_loja,
+                                    "codigo_produto": int(r["Código"]), 
+                                    "quantidade": qtd_int, 
+                                    "usuario": usuario_atual
+                                })
+                        if lista_insert: 
+                            supabase.table("pedidos").insert(lista_insert).execute()
             st.success("Alterações consolidadas com sucesso!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -371,7 +378,6 @@ def iniciar_tela(setor: str):
 
         st.metric(label="📝 Seus Itens Preenchidos", value=f"{itens_digitados} produtos")
 
-        # Chama a função de estoque passando o 'setor'
         df_estoque = buscar_estoque_erp(loja_selecionada, df_loja["codigo"].tolist(), setor)
         df_loja = pd.merge(df_loja, df_estoque, left_on='codigo', right_on='Código', how='left')
         df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
@@ -384,9 +390,6 @@ def iniciar_tela(setor: str):
             'Qtde Pedida': df_loja['quantidade'], 'Observação': df_loja['observacao']
         }).sort_values(by='Descrição')
 
-        # ─────────────────────────────────────────────────────────────────
-        # BARRA DE BUSCA
-        # ─────────────────────────────────────────────────────────────────
         texto_busca = st.text_input("🔍 Buscar Produto (por Código ou Nome):", placeholder="Ex: Alface ou 12345")
         st.caption("⚠️ Aviso: Salve o seu pedido antes de limpar ou alterar a busca, para não perder o que foi digitado.")
         
@@ -408,7 +411,6 @@ def iniciar_tela(setor: str):
             "Observação": st.column_config.TextColumn("Observação", max_chars=100, width=180)
         }
 
-        # Renderiza o editor de dados com o DataFrame filtrado
         grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=True)
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
@@ -431,7 +433,6 @@ def iniciar_tela(setor: str):
                 codigos_na_tela = grid_editado["Código"].tolist()
                 
                 if codigos_na_tela:
-                    # Deleta apenas os itens visíveis na tela
                     supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).in_("codigo_produto", codigos_na_tela).execute()
                     
                     lista_inserts = []
