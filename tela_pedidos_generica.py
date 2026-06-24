@@ -107,7 +107,7 @@ def iniciar_tela(setor: str):
     usuario_atual = st.session_state.get('usuario_logado', 'Loja 01')
     acesso_total = (usuario_atual == "Administrador")
 
-    # 🔥 INJEÇÃO DE CSS PARA CENTRALIZAÇÃO E BOTÃO VERMELHO
+    # 🔥 INJEÇÃO DE CSS PARA CENTRALIZAÇÃO E FORÇAR BOTÃO VERMELHO NA SIDEBAR
     st.markdown("""
         <style>
         /* Força o contêiner principal a usar toda a largura disponível na direita */
@@ -115,15 +115,17 @@ def iniciar_tela(setor: str):
         /* Centraliza o texto dentro das células do editor de dados */
         div[data-testid="stTable"] td { text-align: center !important; }
         
-        /* Transforma APENAS o botão 'primary' da sidebar em vermelho vivo */
-        div[data-testid="stSidebar"] button[kind="primary"] {
+        /* Alvo robusto para transformar APENAS o botão 'primary' da sidebar em vermelho */
+        [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"],
+        [data-testid="stSidebar"] button[kind="primary"] {
             background-color: #ff4b4b !important;
             color: white !important;
             border-color: #ff4b4b !important;
         }
-        div[data-testid="stSidebar"] button[kind="primary"]:hover {
-            background-color: #ff3333 !important;
-            border-color: #ff3333 !important;
+        [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"]:hover,
+        [data-testid="stSidebar"] button[kind="primary"]:hover {
+            background-color: #d33333 !important;
+            border-color: #d33333 !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -137,7 +139,8 @@ def iniciar_tela(setor: str):
         else:
             perfil_navegacao = "Visão das Lojas"
 
-    if acesso_total and perfil_navegacao in ["Separação e Fechamento", "Visão Fornecedores (Resumo)"]:
+    # Alterado aqui: agora o menu administrativo completo aparece fixo para o Admin em qualquer tela
+    if acesso_total:
         with st.sidebar:
             st.markdown("---")
             
@@ -198,7 +201,7 @@ def iniciar_tela(setor: str):
                         st.error(f"Erro na sincronização: {e}")
 
             # ─────────────────────────────────────────────────────────────────
-            # BLOCO 2: LIMPAR PEDIDOS (Destacado no Fim)
+            # BLOCO 2: LIMPAR PEDIDOS (Destacado em vermelho no final)
             # ─────────────────────────────────────────────────────────────────
             st.markdown("---")
             if st.button("🗑️ Limpar Pedidos de Hoje", type="primary", use_container_width=True):
@@ -296,7 +299,7 @@ def iniciar_tela(setor: str):
                         if qtd_int > 0:
                             lista_insert.append({
                                 "data_pedido": str(date.today()), 
-                                "setor": setor, 
+                                "setor", setor, 
                                 "loja": n_loja,
                                 "codigo_produto": int(r["Código"]), 
                                 "quantidade": qtd_int, 
@@ -416,7 +419,7 @@ def iniciar_tela(setor: str):
                         if qtd_int > 0:
                             lista_inserts.append({
                                 "data_pedido": str(date.today()), 
-                                "setor": setor, 
+                                "setor", setor, 
                                 "loja": num_loja, 
                                 "codigo_produto": int(r["Código"]),
                                 "quantidade": qtd_int, 
