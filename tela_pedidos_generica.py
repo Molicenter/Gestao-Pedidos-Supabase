@@ -540,7 +540,7 @@ def iniciar_tela(setor: str):
                 st.success("Alterações de fornecedores consolidadas com sucesso!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 4 — CATÁLOGO DE PRODUTOS (COM MIGRAÇÃO SEGURA BLINDADA)
+    # ROTA 4 — CATÁLOGO DE PRODUTOS (COM UPDATE DIRETO E SEGURO)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Catálogo de Produtos":
         st.markdown(f"## 🗂️ Gestão de Catálogo e Permissões por Loja — {setor}")
@@ -641,42 +641,23 @@ def iniciar_tela(setor: str):
                                 prod_changes["nome_personalizado"] = str(val_np).strip() if pd.notna(val_np) and str(val_np).strip() != "" else None
                             
                             if "codigo" in changes:
-                                novo_cod = int(changes["codigo"])
-                                
-                                # Verifica duplicidade antes de inserir
-                                check = supabase.table("produtos").select("codigo").eq("codigo", novo_cod).execute()
-                                if len(check.data) > 0:
-                                    st.error(f"⚠️ O código {novo_cod} já existe. Não é possível duplicar o código. Alteração cancelada para este item.")
+                                try:
+                                    novo_cod = int(changes["codigo"])
+                                    # Verifica se o código digitado já existe
+                                    check = supabase.table("produtos").select("codigo").eq("codigo", novo_cod).execute()
+                                    if len(check.data) > 0:
+                                        st.error(f"⚠️ O código {novo_cod} já existe no banco. Alteração de código cancelada para este item.")
+                                        continue
+                                    prod_changes["codigo"] = novo_cod
+                                except:
+                                    st.error("⚠️ Código inválido ignorado.")
                                     continue
-                                
-                                orig_prod_req = supabase.table("produtos").select("*").eq("codigo", cod_p_original).execute()
-                                if orig_prod_req.data:
-                                    old_data = orig_prod_req.data[0]
-                                    
-                                    new_prod_data = {
-                                        "codigo": novo_cod,
-                                        "descricao": prod_changes.get("descricao", old_data.get("descricao")),
-                                        "fornecedor": prod_changes.get("fornecedor", old_data.get("fornecedor")),
-                                        "nome_personalizado": prod_changes.get("nome_personalizado", old_data.get("nome_personalizado")),
-                                        "setor": old_data.get("setor", setor),
-                                        "ativo": old_data.get("ativo", True)
-                                    }
-                                    
-                                    # Limpa NaNs do Pandas para não quebrar a API do PostgREST
-                                    for k, v in new_prod_data.items():
-                                        if pd.isna(v):
-                                            new_prod_data[k] = None
-                                            
-                                    supabase.table("produtos").insert(new_prod_data).execute()
-                                    supabase.table("produtos_lojas").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
-                                    supabase.table("pedidos").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
-                                    supabase.table("medias_90d").update({"codigo_produto": novo_cod}).eq("codigo_produto", cod_p_original).execute()
-                                    supabase.table("produtos").delete().eq("codigo", cod_p_original).execute()
-                            else:
-                                if prod_changes:
-                                    supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
+                            
+                            if prod_changes:
+                                # Update limpo. Requer que o banco esteja configurado com CASCADE.
+                                supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
-                    # O LOOP FOI CORRIGIDO AQUI PARA RANGE(1, 9) PARA NÃO IGNORAR A LOJA 08!
+                    # Upsert das permissões cobrindo até a Loja 08
                     lista_upserts_permissoes = []
                     for _, row in edited_cat.iterrows():
                         if pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "": 
