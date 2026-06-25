@@ -366,7 +366,7 @@ def iniciar_tela(setor: str):
         df_prod = pd.DataFrame(resp_prod.data)
 
         if df_prod.empty:
-            st.warning("Nenhum produto cadastrado.")
+            st.warning("Nenhum produto cadastrado para este setor.")
             return
 
         if 'codigo_erp' not in df_prod.columns: df_prod['codigo_erp'] = df_prod['codigo']
@@ -411,7 +411,9 @@ def iniciar_tela(setor: str):
         df_estoque = buscar_estoque_erp(loja_selecionada, codigos_busca_erp, setor)
         df_loja = pd.merge(df_loja, df_estoque, left_on='codigo_erp', right_on='Código', how='left')
         df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
-        df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""})
+        
+        # 🟢 CONVERSÃO DE TIPO APLICADA AQUI PARA DESTRAVAR A INTERFACE
+        df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
 
         df_final_grid = pd.DataFrame({
             'codigo': df_loja['codigo'], # PK Oculta
@@ -441,7 +443,8 @@ def iniciar_tela(setor: str):
             "Qtde Pedida": st.column_config.TextColumn("Qtde", width=100)
         }
 
-        grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=True)
+        # 🟢 KEY DINÂMICA ADICIONADA AQUI
+        grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=True, key=f"grid_loja_{num_loja}")
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
         with c_salvar: btn_salvar_loja = st.button("💾 Salvar Pedido Oficial", type="primary", use_container_width=True)
