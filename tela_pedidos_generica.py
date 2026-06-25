@@ -97,6 +97,20 @@ def exibir_status_digitacao_lojas(df_pedidos_hoje):
                 st.markdown(f"<div style='text-align:center; background-color:#f8d7da; color:#721c24; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>❌ Faltando</div>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
+# 🚀 NOVA FUNÇÃO BLINDADA: Burlar o limite de 1000 linhas da API do Supabase
+def buscar_permissoes_setor(supabase_client, codigos_setor, num_loja=None):
+    if not codigos_setor: return pd.DataFrame()
+    dfs = []
+    for i in range(0, len(codigos_setor), 200):
+        lote = codigos_setor[i:i+200]
+        query = supabase_client.table("produtos_lojas").select("codigo_produto, loja, disponivel").in_("codigo_produto", lote)
+        if num_loja is not None:
+            query = query.eq("loja", num_loja)
+        resp = query.execute()
+        if resp.data:
+            dfs.append(pd.DataFrame(resp.data))
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🧠 FUNÇÃO DIRETORA DO MÓDULO UNIFICADO
 # ─────────────────────────────────────────────────────────────────────────────
@@ -227,16 +241,15 @@ def iniciar_tela(setor: str):
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
         
-        # Puxando a tabela completa de permissões para garantir o bloqueio visual ("-")
-        resp_perm_all = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").execute()
-        df_perm_all = pd.DataFrame(resp_perm_all.data)
-        
         df_prod = pd.DataFrame(resp_prod.data)
         df_ped = pd.DataFrame(resp_ped.data)
         
         if df_prod.empty:
             st.warning("Nenhum produto cadastrado para este setor.")
             return
+            
+        codigos_setor = df_prod['codigo'].tolist()
+        df_perm_all = buscar_permissoes_setor(supabase, codigos_setor)
 
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
@@ -253,20 +266,22 @@ def iniciar_tela(setor: str):
         if 'codigo_produto' in df_consolidado.columns:
             df_consolidado = df_consolidado.drop(columns=['codigo_produto'])
         
-        # Construção blindada da Matriz de Permissões
         if not df_perm_all.empty:
             df_perm_all['loja_nome'] = df_perm_all['loja'].apply(lambda x: f"Loja {int(x):02d}_perm")
             df_perm_pivot = df_perm_all.pivot_table(index='codigo_produto', columns='loja_nome', values='disponivel', aggfunc='last').reset_index()
-            for n in range(1, 9):
-                if f"Loja {n:02d}_perm" not in df_perm_pivot.columns: df_perm_pivot[f"Loja {n:02d}_perm"] = False
         else:
-            df_perm_pivot = pd.DataFrame(columns=['codigo_produto'] + [f"Loja {n:02d}_perm" for n in range(1, 9)])
+            df_perm_pivot = pd.DataFrame(columns=['codigo_produto'])
 
         df_consolidado = pd.merge(df_consolidado, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left')
         
-        # Oculta da tela a linha inteira se o produto não estiver liberado para NENHUMA loja
-        perm_cols = [f"{l}_perm" for l in LOJAS_NOMES]
-        mask_active = df_consolidado[perm_cols].fillna(False).any(axis=1)
+        perm_cols = [f"Loja {n:02d}_perm" for n in range(1, 9)]
+        # Garante que a coluna de permissão existe e padroniza para True se não houver regra explícita
+        for col in perm_cols:
+            if col not in df_consolidado.columns:
+                df_consolidado[col] = True
+                
+        df_consolidado[perm_cols] = df_consolidado[perm_cols].fillna(True)
+        mask_active = df_consolidado[perm_cols].any(axis=1)
         df_consolidado = df_consolidado[mask_active]
 
         for loja in LOJAS_NOMES:
@@ -293,7 +308,6 @@ def iniciar_tela(setor: str):
 
         df_consolidado["TOTAL GERAL"] = df_consolidado["TOTAL_NUM"].replace({0: ""})
         
-        # Oculta com traço "-" a célula onde a loja específica está bloqueada
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
             perm_col = f"{loja}_perm"
@@ -302,7 +316,6 @@ def iniciar_tela(setor: str):
 
         df_consolidado = df_consolidado.rename(columns={'codigo': 'Código', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         
-        # APLICAÇÃO DE ORDEM ALFABÉTICA AUTOMÁTICA
         df_exibicao = df_consolidado[["Fornecedor", "Código", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by=['Fornecedor', 'Descrição'])
 
         col_cfg = {
@@ -367,24 +380,37 @@ def iniciar_tela(setor: str):
         st.markdown(f"## 🥬 Lançamento de Pedidos — {loja_selecionada}")
         
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor, nome_personalizado").eq("setor", setor).eq("ativo", True).execute()
+        df_prod = pd.DataFrame(resp_prod.data)
+
+        if df_prod.empty:
+            st.warning("Nenhum produto cadastrado para este setor.")
+            return
+
+        codigos_setor = df_prod['codigo'].tolist()
+        df_perm = buscar_permissoes_setor(supabase, codigos_setor, num_loja)
         
-        # Inner Join vai eliminar produtos que a loja não tem permissão para ver
-        resp_perm = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").eq("loja", num_loja).eq("disponivel", True).execute()
         resp_med = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
         resp_existente = supabase.table("pedidos").select("codigo_produto, quantidade").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
 
-        df_prod = pd.DataFrame(resp_prod.data)
-        df_perm = pd.DataFrame(resp_perm.data)
         df_med = pd.DataFrame(resp_med.data)
         df_existente = pd.DataFrame(resp_existente.data)
 
-        if df_prod.empty or df_perm.empty:
+        df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
+
+        # Left join para garantir que não vai sumir se a API falhar
+        df_loja = pd.merge(df_prod, df_perm, left_on='codigo', right_on='codigo_produto', how='left')
+        if 'disponivel' not in df_loja.columns:
+            df_loja['disponivel'] = True
+        else:
+            df_loja['disponivel'] = df_loja['disponivel'].fillna(True)
+            
+        # Filtra apenas os permitidos
+        df_loja = df_loja[df_loja['disponivel'] == True]
+
+        if df_loja.empty:
             st.warning("Nenhum produto liberado para esta loja neste setor.")
             return
 
-        df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
-
-        df_loja = pd.merge(df_prod, df_perm, left_on='codigo', right_on='codigo_produto', how='inner')
         df_loja = pd.merge(df_loja, df_med, on='codigo_produto', how='left')
         df_loja['media_dia'] = df_loja['media_dia'].fillna(0.0)
 
@@ -404,7 +430,6 @@ def iniciar_tela(setor: str):
 
         df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""})
 
-        # APLICAÇÃO DE ORDEM ALFABÉTICA AUTOMÁTICA
         df_final_grid = pd.DataFrame({
             'Código': df_loja['codigo'], 'Fornecedor': df_loja['fornecedor'], 'Descrição': df_loja['descricao'],
             'Média (90d)': df_loja['media_dia'], 'Estoque ERP': df_loja['Estoque'],
@@ -480,15 +505,16 @@ def iniciar_tela(setor: str):
         
         resp_prod = supabase.table("produtos").select("codigo, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
-        resp_perm_all = supabase.table("produtos_lojas").select("codigo_produto, loja, disponivel").execute()
         
         df_prod = pd.DataFrame(resp_prod.data)
         df_ped = pd.DataFrame(resp_ped.data)
-        df_perm_all = pd.DataFrame(resp_perm_all.data)
 
         if df_prod.empty:
             st.info("Nenhum produto cadastrado hoje para este setor até o momento.")
             return
+            
+        codigos_setor = df_prod['codigo'].tolist()
+        df_perm_all = buscar_permissoes_setor(supabase, codigos_setor)
 
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
@@ -507,26 +533,26 @@ def iniciar_tela(setor: str):
             if loja not in df_mestre.columns: df_mestre[loja] = 0.0
             df_mestre[loja] = df_mestre[loja].fillna(0).astype(int)
 
-        # Construção blindada da Matriz de Permissões
         if not df_perm_all.empty:
             df_perm_all['loja_nome'] = df_perm_all['loja'].apply(lambda x: f"Loja {int(x):02d}_perm")
             df_perm_pivot = df_perm_all.pivot_table(index='codigo_produto', columns='loja_nome', values='disponivel', aggfunc='last').reset_index()
-            for n in range(1, 9):
-                if f"Loja {n:02d}_perm" not in df_perm_pivot.columns: df_perm_pivot[f"Loja {n:02d}_perm"] = False
         else:
-            df_perm_pivot = pd.DataFrame(columns=['codigo_produto'] + [f"Loja {n:02d}_perm" for n in range(1, 9)])
+            df_perm_pivot = pd.DataFrame(columns=['codigo_produto'])
 
         df_mestre = pd.merge(df_mestre, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left')
         
-        # Filtra da tela os itens sem nenhuma permissão geral
-        perm_cols = [f"{l}_perm" for l in LOJAS_NOMES]
-        mask_active = df_mestre[perm_cols].fillna(False).any(axis=1)
+        perm_cols = [f"Loja {n:02d}_perm" for n in range(1, 9)]
+        for col in perm_cols:
+            if col not in df_mestre.columns:
+                df_mestre[col] = True
+                
+        df_mestre[perm_cols] = df_mestre[perm_cols].fillna(True)
+        mask_active = df_mestre[perm_cols].any(axis=1)
         df_mestre = df_mestre[mask_active]
 
         df_mestre["TOTAL_NUM"] = df_mestre[LOJAS_NOMES].sum(axis=1)
         df_mestre["TOTAL GERAL"] = df_mestre["TOTAL_NUM"].replace({0: ""})
 
-        # Aplica visualização de bloqueio ("-") e limpa os zeros
         for loja in LOJAS_NOMES:
             df_mestre[loja] = df_mestre[loja].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
             perm_col = f"{loja}_perm"
@@ -535,9 +561,7 @@ def iniciar_tela(setor: str):
 
         all_edited_frames = []
 
-        # Fornecedores já listados em ordem alfabética no menu
         for forn in sorted(df_mestre["fornecedor"].dropna().unique()):
-            # APLICAÇÃO DE ORDEM ALFABÉTICA AUTOMÁTICA POR PRODUTO NO FORNECEDOR
             df_forn_view = df_mestre[df_mestre["fornecedor"] == forn][["codigo", "descricao"] + LOJAS_NOMES + ["TOTAL GERAL"]].rename(columns={'codigo': 'Código', 'descricao': 'Produto'}).sort_values(by='Produto')
             
             with st.container(border=True):
@@ -605,25 +629,26 @@ def iniciar_tela(setor: str):
         st.markdown(f"## 🗂️ Gestão de Catálogo e Permissões por Loja — {setor}")
 
         resp_prod = supabase.table("produtos").select("*").eq("setor", setor).execute()
-        resp_perm = supabase.table("produtos_lojas").select("*").execute()
-
         df_prod = pd.DataFrame(resp_prod.data)
-        df_perm = pd.DataFrame(resp_perm.data)
 
         if df_prod.empty:
             st.warning("Nenhum produto cadastrado no mestre para este setor.")
-            return
+            df_prod = pd.DataFrame(columns=['codigo', 'descricao', 'fornecedor', 'nome_personalizado', 'setor', 'ativo'])
 
-        # Correção Crítica na Tradução do Pivot de Permissões
+        codigos_setor = df_prod['codigo'].tolist() if not df_prod.empty else []
+        df_perm = buscar_permissoes_setor(supabase, codigos_setor)
+
         if not df_perm.empty:
             df_perm['loja_nome'] = df_perm['loja'].apply(lambda x: f"Loja {int(x):02d}")
             df_perm_pivot = df_perm.pivot_table(index='codigo_produto', columns='loja_nome', values='disponivel', aggfunc='last').reset_index()
         else:
             df_perm_pivot = pd.DataFrame(columns=['codigo_produto'] + LOJAS_NOMES)
 
-        df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'], errors='ignore')
+        if not df_prod.empty:
+            df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'], errors='ignore')
+        else:
+            df_cat_completo = pd.DataFrame(columns=['codigo', 'descricao', 'fornecedor', 'nome_personalizado'] + LOJAS_NOMES)
         
-        # Garante que as colunas existam e não fiquem vazias
         for l in LOJAS_NOMES: 
             if l not in df_cat_completo.columns:
                 df_cat_completo[l] = True
@@ -635,8 +660,8 @@ def iniciar_tela(setor: str):
         else:
             df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
 
-        # APLICAÇÃO DE ORDEM ALFABÉTICA AUTOMÁTICA
-        df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao'])
+        if not df_cat_completo.empty:
+            df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao'])
 
         col_cfg_c = {
             "codigo": st.column_config.NumberColumn("Cód.", format="%d", width=70), 
@@ -671,29 +696,15 @@ def iniciar_tela(setor: str):
         if btn_salvar:
             state = st.session_state.get("catalogo_editor")
             
-            with st.spinner("Sincronizando modificações com o Supabase..."):
+            with st.spinner("Processando alterações e garantindo inserções..."):
                 try:
+                    codigos_banco = df_prod['codigo'].tolist() if not df_prod.empty else []
+                    codigos_na_tela = edited_cat['codigo'].dropna().astype(int).tolist()
+
                     if state and state.get("deleted_rows"):
                         for idx in state["deleted_rows"]:
                             cod_p = int(df_cat_completo.iloc[idx]["codigo"])
-                            supabase.table("produtos").delete().eq("codigo", cod_p).execute() # CASCADE apaga filhos
-
-                    if state and state.get("added_rows"):
-                        for row in state["added_rows"]:
-                            if "codigo" not in row or pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "":
-                                st.error("Erro crítico: Todo novo produto precisa de um Código!")
-                                st.stop()
-                            
-                            cod_p = int(row["codigo"])
-                            new_prod = {
-                                "codigo": cod_p,
-                                "descricao": str(row.get("descricao", "Novo Produto")),
-                                "fornecedor": str(row.get("fornecedor", "Box")),
-                                "nome_personalizado": str(row.get("nome_personalizado", "")).strip() if row.get("nome_personalizado") else None,
-                                "setor": setor,
-                                "ativo": True
-                            }
-                            supabase.table("produtos").insert(new_prod).execute()
+                            supabase.table("produtos").delete().eq("codigo", cod_p).execute()
 
                     if state and state.get("edited_rows"):
                         for idx_str, changes in state["edited_rows"].items():
@@ -712,30 +723,50 @@ def iniciar_tela(setor: str):
                                     novo_cod = int(changes["codigo"])
                                     check = supabase.table("produtos").select("codigo").eq("codigo", novo_cod).execute()
                                     if len(check.data) > 0:
-                                        st.error(f"⚠️ O código {novo_cod} já existe no banco. Alteração de código cancelada para este item.")
+                                        st.error(f"⚠️ O código {novo_cod} já existe no banco. Alteração de código cancelada.")
                                         continue
                                     prod_changes["codigo"] = novo_cod
+                                    codigos_banco.append(novo_cod)
                                 except:
                                     st.error("⚠️ Código inválido ignorado.")
                                     continue
                             
                             if prod_changes:
-                                # Funciona de forma segura graças ao CASCADE no SQL
                                 supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
-                    # Limpeza Definitiva de Permissões e Re-inserção
-                    codigos_tela = edited_cat["codigo"].dropna().astype(int).tolist()
-                    if codigos_tela:
-                        for i in range(0, len(codigos_tela), 200):
-                            supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_tela[i:i+200]).execute()
+                    for _, row in edited_cat.iterrows():
+                        if pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "":
+                            continue
+                        
+                        c = int(row["codigo"])
+                        if c not in codigos_banco:
+                            desc_add = str(row["descricao"]) if pd.notna(row["descricao"]) and str(row["descricao"]).strip() != "" else "Novo Produto"
+                            forn_add = str(row["fornecedor"]) if pd.notna(row["fornecedor"]) and str(row["fornecedor"]).strip() != "" else "Box"
+                            np_add = str(row["nome_personalizado"]).strip() if pd.notna(row["nome_personalizado"]) and str(row["nome_personalizado"]).strip() != "" else None
+                            
+                            new_prod = {
+                                "codigo": c,
+                                "descricao": desc_add,
+                                "fornecedor": forn_add,
+                                "nome_personalizado": np_add,
+                                "setor": setor,
+                                "ativo": True
+                            }
+                            supabase.table("produtos").insert(new_prod).execute()
+                            codigos_banco.append(c)
+
+                    if codigos_na_tela:
+                        for i in range(0, len(codigos_na_tela), 200):
+                            supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_na_tela[i:i+200]).execute()
                         
                         lista_perms = []
                         for _, row in edited_cat.iterrows():
-                            if pd.isna(row["codigo"]): continue
+                            if pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "": 
+                                continue
                             c = int(row["codigo"])
                             for num_loja in range(1, 9):
-                                val = bool(row[f"Loja {num_loja:02d}"])
-                                lista_perms.append({"codigo_produto": c, "loja": num_loja, "disponivel": val})
+                                val_loja = bool(row[f"Loja {num_loja:02d}"])
+                                lista_perms.append({"codigo_produto": c, "loja": num_loja, "disponivel": val_loja})
                                 
                         for i in range(0, len(lista_perms), 1000):
                             supabase.table("produtos_lojas").insert(lista_perms[i:i+1000]).execute()
@@ -745,6 +776,7 @@ def iniciar_tela(setor: str):
                     st.rerun()
                 except Exception as e:
                     st.error(f"⚠️ Houve um erro processando a alteração. Detalhes: {e}")
+                    st.exception(e)
 
         if btn_puxar_erp:
             with st.spinner("Buscando nomes oficiais no ERP..."):
@@ -755,17 +787,16 @@ def iniciar_tela(setor: str):
                         st.warning("Nenhum código de produto encontrado na tabela.")
                     else:
                         cods_str = ", ".join(map(str, set(cods)))
-                        query_nomes = f"SELECT cadp_codigo, cadp_descricao FROM cadprod WHERE cadp_codigo IN ({cods_str})"
-                        
+                        query_nomes = f"SELECT cod, descricao FROM python_ajuste_cadastro WHERE cod IN ({cods_str})"
                         df_nomes = conn_pg.query(query_nomes, ttl=0)
 
                         if not df_nomes.empty:
                             for _, row in df_nomes.iterrows():
-                                cod_erp = int(row["cadp_codigo"])
-                                desc_erp = str(row["cadp_descricao"])
+                                cod_erp = int(row["cod"])
+                                desc_erp = str(row["descricao"])
                                 supabase.table("produtos").update({"descricao": desc_erp}).eq("codigo", cod_erp).execute()
                             
-                            st.success("✅ Nomes Oficiais sincronizados com sucesso!")
+                            st.success("✅ Nomes Oficiais sincronizados com sucesso da sua View!")
                             time.sleep(1)
                             st.rerun()
                         else:
