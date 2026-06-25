@@ -623,7 +623,7 @@ def iniciar_tela(setor: str):
                 st.success("Alterações de fornecedores consolidadas com sucesso!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 4 — CATÁLOGO DE PRODUTOS (COM VARREDURA BLINDADA)
+    # ROTA 4 — CATÁLOGO DE PRODUTOS (COM AUTOMAÇÃO INTELIGENTE CORRIGIDA)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Catálogo de Produtos":
         st.markdown(f"## 🗂️ Gestão de Catálogo e Permissões por Loja — {setor}")
@@ -661,7 +661,7 @@ def iniciar_tela(setor: str):
             df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
 
         if not df_cat_completo.empty:
-            df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao'])
+            df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao']).reset_index(drop=True)
 
         col_cfg_c = {
             "codigo": st.column_config.NumberColumn("Cód.", format="%d", width=70), 
@@ -696,15 +696,14 @@ def iniciar_tela(setor: str):
         if btn_salvar:
             state = st.session_state.get("catalogo_editor")
             
+            # ATENÇÃO À REGRA DE TELA DO STREAMLIT:
+            # Ao adicionar uma linha, certifique-se de apertar Enter ou clicar fora da célula
+            # antes de clicar em Salvar, senão o painel "esquece" o que você estava digitando!
+            
             with st.spinner("Automação Inteligente processando seu catálogo..."):
                 try:
-                    # Carrega banco global para checar duplicações (garantir Option 2)
                     resp_all = supabase.table("produtos").select("codigo").execute()
                     codigos_globais = [p["codigo"] for p in resp_all.data] if resp_all.data else []
-                    
-                    # Cria um cofre do que já existia na tela para comparar depois
-                    codigos_conhecidos = set(df_cat_completo['codigo'].dropna().astype(int).tolist()) if not df_cat_completo.empty else set()
-                    
                     mapa_conflitos = {}
 
                     # 1. DELETES
@@ -713,7 +712,6 @@ def iniciar_tela(setor: str):
                             cod_p = int(df_cat_completo.iloc[idx]["codigo"])
                             supabase.table("produtos").delete().eq("codigo", cod_p).execute()
                             if cod_p in codigos_globais: codigos_globais.remove(cod_p)
-                            if cod_p in codigos_conhecidos: codigos_conhecidos.remove(cod_p)
 
                     # 2. EDITS
                     if state and state.get("edited_rows"):
@@ -747,9 +745,6 @@ def iniciar_tela(setor: str):
                                     mapa_conflitos[(cod_digitado, forn_atual)] = cod_final
                                     prod_changes["codigo"] = cod_final
                                     codigos_globais.append(cod_final)
-                                    if cod_p_original in codigos_conhecidos:
-                                        codigos_conhecidos.remove(cod_p_original)
-                                    codigos_conhecidos.add(cod_digitado)
                                 except:
                                     st.error("⚠️ Código editado inválido ignorado.")
                                     continue
@@ -757,21 +752,21 @@ def iniciar_tela(setor: str):
                             if prod_changes:
                                 supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
-                    # 3. ADDITIONS (Varredura Blindada - Lê a tela e não o Streamlit State)
-                    for _, row in edited_cat.iterrows():
-                        c_tela = row.get("codigo")
-                        if pd.isna(c_tela) or str(c_tela).strip() == "":
-                            continue
-                        
-                        cod_digitado = int(c_tela)
-                        
-                        # Se o código que tá na tela não existia antes... É NOVO! Insere ele!
-                        if cod_digitado not in codigos_conhecidos:
-                            cod_final = cod_digitado
+                    # 3. ADDITIONS (Lendo diretamente as novas linhas inseridas pelo usuário)
+                    if state and state.get("added_rows"):
+                        for row in state["added_rows"]:
+                            c_tela = row.get("codigo")
+                            if pd.isna(c_tela) or str(c_tela).strip() == "":
+                                continue # Ignora se a linha foi criada vazia
+                                
+                            cod_digitado = int(c_tela)
                             forn_add = str(row.get("fornecedor", "Box")).strip()
                             desc_add = str(row.get("descricao", "Novo Produto")).strip()
-                            np_add = str(row.get("nome_personalizado", "")).strip() if pd.notna(row.get("nome_personalizado")) and str(row.get("nome_personalizado")).strip() != "" else None
+                            np_add = str(row.get("nome_personalizado", "")).strip() if row.get("nome_personalizado") else None
                             
+                            cod_final = cod_digitado
+                            
+                            # MAGIA DA OPÇÃO 2: Criação do Sufixo se o código já for de outro fornecedor
                             if cod_final in codigos_globais:
                                 base_str = str(cod_final)
                                 for i in range(1, 100):
@@ -779,7 +774,7 @@ def iniciar_tela(setor: str):
                                     if tent not in codigos_globais:
                                         cod_final = tent
                                         break
-                                st.toast(f"🤖 O código {cod_digitado} já existia. Salvo como {cod_final} para não dar conflito!", icon="✨")
+                                st.toast(f"🤖 O código {cod_digitado} já existia. Salvo como {cod_final} para evitar bloqueios!", icon="✨")
                             
                             mapa_conflitos[(cod_digitado, forn_add)] = cod_final
                             
@@ -787,11 +782,9 @@ def iniciar_tela(setor: str):
                                 "codigo": cod_final, "descricao": desc_add, "fornecedor": forn_add, 
                                 "nome_personalizado": np_add, "setor": setor, "ativo": True
                             }).execute()
-                            
                             codigos_globais.append(cod_final)
-                            codigos_conhecidos.add(cod_digitado)
 
-                    # 4. UPSERT DAS PERMISSÕES (Rastreando os códigos que mudaram)
+                    # 4. UPSERT DAS PERMISSÕES (Rastreando os códigos que mudaram para a nova ID)
                     lista_perms_geral = []
                     codigos_processados_perms = set()
                     
@@ -802,6 +795,7 @@ def iniciar_tela(setor: str):
                         c_tela = int(c_tela)
                         f_tela = str(row.get("fornecedor", "")).strip()
                         
+                        # Converte para o código novo com sufixo, caso tenha passado pela automação
                         c_final = mapa_conflitos.get((c_tela, f_tela), c_tela)
                         
                         codigos_processados_perms.add(c_final)
@@ -809,7 +803,7 @@ def iniciar_tela(setor: str):
                             val_loja = bool(row.get(f"Loja {num_loja:02d}", True))
                             lista_perms_geral.append({"codigo_produto": c_final, "loja": num_loja, "disponivel": val_loja})
 
-                    # Limpa e Grava Permissões Seguras
+                    # Limpa e Grava Permissões Seguras em Lotes
                     codigos_lista = list(codigos_processados_perms)
                     if codigos_lista:
                         for i in range(0, len(codigos_lista), 200):
