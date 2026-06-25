@@ -599,7 +599,8 @@ def iniciar_tela(setor: str):
 
         if df_prod.empty:
             st.warning("Nenhum produto cadastrado no mestre para este setor.")
-            return
+            # Cria um df_prod vazio mas com a estrutura correta para evitar erros
+            df_prod = pd.DataFrame(columns=['codigo', 'descricao', 'fornecedor', 'nome_personalizado', 'setor', 'ativo'])
 
         # Correção da view de permissões para garantir colunas corretas
         if not df_perm.empty:
@@ -608,7 +609,10 @@ def iniciar_tela(setor: str):
         else:
             df_perm_pivot = pd.DataFrame(columns=['codigo_produto'] + LOJAS_NOMES)
 
-        df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'], errors='ignore')
+        if not df_prod.empty:
+            df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'], errors='ignore')
+        else:
+            df_cat_completo = pd.DataFrame(columns=['codigo', 'descricao', 'fornecedor', 'nome_personalizado'] + LOJAS_NOMES)
         
         for l in LOJAS_NOMES: 
             if l not in df_cat_completo.columns:
@@ -621,7 +625,8 @@ def iniciar_tela(setor: str):
         else:
             df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
 
-        df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao'])
+        if not df_cat_completo.empty:
+            df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao'])
 
         col_cfg_c = {
             "codigo": st.column_config.NumberColumn("Cód.", format="%d", width=70), 
@@ -656,30 +661,18 @@ def iniciar_tela(setor: str):
         if btn_salvar:
             state = st.session_state.get("catalogo_editor")
             
-            with st.spinner("Sincronizando modificações com o Supabase..."):
+            with st.spinner("Processando alterações e garantindo inserções..."):
                 try:
+                    codigos_banco = df_prod['codigo'].tolist() if not df_prod.empty else []
+                    codigos_na_tela = edited_cat['codigo'].dropna().astype(int).tolist()
+
+                    # 1. PROCESSAR DELETES (O que você explicitamente deletou)
                     if state and state.get("deleted_rows"):
                         for idx in state["deleted_rows"]:
                             cod_p = int(df_cat_completo.iloc[idx]["codigo"])
                             supabase.table("produtos").delete().eq("codigo", cod_p).execute()
 
-                    if state and state.get("added_rows"):
-                        for row in state["added_rows"]:
-                            if "codigo" not in row or pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "":
-                                st.error("Erro crítico: Todo novo produto precisa de um Código!")
-                                st.stop()
-                            
-                            cod_p = int(row["codigo"])
-                            new_prod = {
-                                "codigo": cod_p,
-                                "descricao": str(row.get("descricao", "Novo Produto")),
-                                "fornecedor": str(row.get("fornecedor", "Box")),
-                                "nome_personalizado": str(row.get("nome_personalizado", "")).strip() if row.get("nome_personalizado") else None,
-                                "setor": setor,
-                                "ativo": True
-                            }
-                            supabase.table("produtos").insert(new_prod).execute()
-
+                    # 2. PROCESSAR ALTERAÇÕES DE CÓDIGO/TEXTO
                     if state and state.get("edited_rows"):
                         for idx_str, changes in state["edited_rows"].items():
                             idx = int(idx_str)
@@ -700,6 +693,7 @@ def iniciar_tela(setor: str):
                                         st.error(f"⚠️ O código {novo_cod} já existe no banco. Alteração de código cancelada para este item.")
                                         continue
                                     prod_changes["codigo"] = novo_cod
+                                    codigos_banco.append(novo_cod) # Adiciona à lista segura para não reinserir no passo 3
                                 except:
                                     st.error("⚠️ Código inválido ignorado.")
                                     continue
@@ -707,18 +701,42 @@ def iniciar_tela(setor: str):
                             if prod_changes:
                                 supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
-                    codigos_tela = edited_cat["codigo"].dropna().astype(int).tolist()
-                    if codigos_tela:
-                        for i in range(0, len(codigos_tela), 200):
-                            supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_tela[i:i+200]).execute()
+                    # 3. VARREDURA BLINDADA PARA NOVOS PRODUTOS
+                    # (Se estiver na tela e não estiver no banco, força a inserção!)
+                    for _, row in edited_cat.iterrows():
+                        if pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "":
+                            continue
+                        
+                        c = int(row["codigo"])
+                        if c not in codigos_banco:
+                            desc_add = str(row["descricao"]) if pd.notna(row["descricao"]) and str(row["descricao"]).strip() != "" else "Novo Produto"
+                            forn_add = str(row["fornecedor"]) if pd.notna(row["fornecedor"]) and str(row["fornecedor"]).strip() != "" else "Box"
+                            np_add = str(row["nome_personalizado"]).strip() if pd.notna(row["nome_personalizado"]) and str(row["nome_personalizado"]).strip() != "" else None
+                            
+                            new_prod = {
+                                "codigo": c,
+                                "descricao": desc_add,
+                                "fornecedor": forn_add,
+                                "nome_personalizado": np_add,
+                                "setor": setor,
+                                "ativo": True
+                            }
+                            supabase.table("produtos").insert(new_prod).execute()
+                            codigos_banco.append(c)
+
+                    # 4. ATUALIZAR MATRIZ DE PERMISSÕES
+                    if codigos_na_tela:
+                        for i in range(0, len(codigos_na_tela), 200):
+                            supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_na_tela[i:i+200]).execute()
                         
                         lista_perms = []
                         for _, row in edited_cat.iterrows():
-                            if pd.isna(row["codigo"]): continue
+                            if pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "": 
+                                continue
                             c = int(row["codigo"])
                             for num_loja in range(1, 9):
-                                val = bool(row[f"Loja {num_loja:02d}"])
-                                lista_perms.append({"codigo_produto": c, "loja": num_loja, "disponivel": val})
+                                val_loja = bool(row[f"Loja {num_loja:02d}"])
+                                lista_perms.append({"codigo_produto": c, "loja": num_loja, "disponivel": val_loja})
                                 
                         for i in range(0, len(lista_perms), 1000):
                             supabase.table("produtos_lojas").insert(lista_perms[i:i+1000]).execute()
@@ -728,6 +746,7 @@ def iniciar_tela(setor: str):
                     st.rerun()
                 except Exception as e:
                     st.error(f"⚠️ Houve um erro processando a alteração. Detalhes: {e}")
+                    st.exception(e)
 
         if btn_puxar_erp:
             with st.spinner("Buscando nomes oficiais no ERP..."):
@@ -739,7 +758,6 @@ def iniciar_tela(setor: str):
                     else:
                         cods_str = ", ".join(map(str, set(cods)))
                         
-                        # NOVA QUERY APONTANDO EXATAMENTE PARA A SUA VIEW PERSONALIZADA NO ERP
                         query_nomes = f"SELECT cod, descricao FROM python_ajuste_cadastro WHERE cod IN ({cods_str})"
                         
                         df_nomes = conn_pg.query(query_nomes, ttl=0)
