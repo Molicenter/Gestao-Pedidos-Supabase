@@ -544,10 +544,9 @@ def iniciar_tela(setor: str):
                     "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
                 }
                 
-                # Ajustei a largura das lojas para 60px para ficar mais compacto
-                for l in lojas_ativas: col_cfg_f[l] = st.column_config.TextColumn(l, width=60, disabled=False)
+                # 🟢 MUDANÇA AQUI: Largura ajustada para 85px para caber o texto perfeitamente
+                for l in lojas_ativas: col_cfg_f[l] = st.column_config.TextColumn(l, width=85, disabled=False)
                     
-                # 🟢 MUDANÇA AQUI: use_container_width=False para a tabela não esticar loucamente
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
                 for l in LOJAS_NOMES:
