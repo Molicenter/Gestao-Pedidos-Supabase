@@ -567,7 +567,7 @@ def iniciar_tela(setor: str):
                 st.success("Alterações consolidadas!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 4 — CATÁLOGO DE PRODUTOS (COM DUPLO CÓDIGO INVISÍVEL)
+    # ROTA 4 — CATÁLOGO DE PRODUTOS (COM DELEÇÃO BLINDADA)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Catálogo de Produtos":
         st.markdown(f"## 🗂️ Gestão de Catálogo e Permissões por Loja — {setor}")
@@ -635,11 +635,19 @@ def iniciar_tela(setor: str):
                     
                     mapa_conflitos = {}
 
-                    # 1. DELETES
+                    # 1. DELETES BLINDADOS (Apaga filhos antes do pai)
                     if state and state.get("deleted_rows"):
                         for idx in state["deleted_rows"]:
                             cod_p = int(df_cat_completo.iloc[idx]["codigo"])
+                            
+                            # Limpeza preventiva para não dar erro de Foreign Key
+                            supabase.table("produtos_lojas").delete().eq("codigo_produto", cod_p).execute()
+                            supabase.table("pedidos").delete().eq("codigo_produto", cod_p).execute()
+                            supabase.table("medias_90d").delete().eq("codigo_produto", cod_p).execute()
+                            
+                            # Agora apaga o mestre
                             supabase.table("produtos").delete().eq("codigo", cod_p).execute()
+                            
                             if cod_p in codigos_globais: codigos_globais.remove(cod_p)
                             if cod_p in codigos_conhecidos: codigos_conhecidos.remove(cod_p)
 
@@ -733,7 +741,6 @@ def iniciar_tela(setor: str):
         if btn_puxar_erp:
             with st.spinner("Buscando nomes oficias usando Cód. ERP..."):
                 try:
-                    # Usa o código ERP para consultar a View Oficial
                     cods_erp = [int(c) for c in edited_cat["codigo_erp"].tolist() if pd.notna(c) and str(c).strip() != ""]
                     if not cods_erp: st.warning("Nenhum código encontrado.")
                     else:
@@ -745,7 +752,6 @@ def iniciar_tela(setor: str):
                             for _, row in df_nomes.iterrows():
                                 cod_oficial = int(row["cod"])
                                 desc_erp = str(row["descricao"])
-                                # Atualiza o nome em todos os fornecedores que compartilham esse código!
                                 supabase.table("produtos").update({"descricao": desc_erp}).eq("codigo_erp", cod_oficial).execute()
                             st.success("✅ Nomes atualizados em todos os fornecedores!")
                             time.sleep(1)
@@ -753,4 +759,7 @@ def iniciar_tela(setor: str):
                         else:
                             st.info("Nenhum nome encontrado.")
                 except Exception as e:
-                    st.error(f"Erro: {e}")
+                    if "No database configured" in str(e) or "missing" in str(e).lower():
+                        st.error("⚠️ Aviso: Credenciais do PostgreSQL não configuradas ou inacessíveis.")
+                    else:
+                        st.error(f"⚠️ Erro ao buscar nomes no banco ERP: {e}")
