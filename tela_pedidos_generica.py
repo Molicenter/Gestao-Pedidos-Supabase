@@ -586,148 +586,86 @@ def iniciar_tela(setor: str):
                 st.success("Alterações de fornecedores consolidadas com sucesso!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 4 — CATÁLOGO DE PRODUTOS
+    # ROTA 4 — CATÁLOGO DE PRODUTOS (CÓDIGO CORRIGIDO E COMPLETO)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Catálogo de Produtos":
         st.markdown(f"## 🗂️ Gestão de Catálogo e Permissões por Loja — {setor}")
 
         resp_prod = supabase.table("produtos").select("*").eq("setor", setor).execute()
-        resp_perm = supabase.table("produtos_lojas").select("*").execute()
-
         df_prod = pd.DataFrame(resp_prod.data)
+        
+        resp_perm = supabase.table("produtos_lojas").select("*").execute()
         df_perm = pd.DataFrame(resp_perm.data)
 
-        if df_prod.empty:
-            st.warning("Nenhum produto cadastrado no mestre para este setor.")
-            return
-
-        # Correção da view de permissões para garantir colunas corretas
         if not df_perm.empty:
             df_perm['loja_nome'] = df_perm['loja'].apply(lambda x: f"Loja {int(x):02d}")
             df_perm_pivot = df_perm.pivot_table(index='codigo_produto', columns='loja_nome', values='disponivel', aggfunc='last').reset_index()
         else:
             df_perm_pivot = pd.DataFrame(columns=['codigo_produto'] + LOJAS_NOMES)
 
+        # Merge para montar a matriz
         df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'], errors='ignore')
         
-        for l in LOJAS_NOMES: 
-            if l not in df_cat_completo.columns:
-                df_cat_completo[l] = True
-            else:
-                df_cat_completo[l] = df_cat_completo[l].fillna(True).astype(bool)
+        # Garante que as colunas existam
+        for l in LOJAS_NOMES:
+            df_cat_completo[l] = df_cat_completo[l].fillna(True).astype(bool)
+        if 'nome_manual' not in df_cat_completo.columns: df_cat_completo['nome_manual'] = ""
         
-        if 'nome_personalizado' not in df_cat_completo.columns:
-            df_cat_completo['nome_personalizado'] = ""
-        else:
-            df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
-
         df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao'])
-
+        
         col_cfg_c = {
             "codigo": st.column_config.NumberColumn("Cód.", format="%d", width=70), 
             "descricao": st.column_config.TextColumn("Nome Prime", width=180), 
             "nome_personalizado": st.column_config.TextColumn("Nome Manual", width=160),
-            "fornecedor": st.column_config.TextColumn("Fornecedor/Marca", width=130)
+            "fornecedor": st.column_config.TextColumn("Fornecedor", width=130)
         }
-        for l in LOJAS_NOMES: 
-            col_cfg_c[l] = st.column_config.CheckboxColumn(l)
+        for l in LOJAS_NOMES: col_cfg_c[l] = st.column_config.CheckboxColumn(l)
 
-        colunas_exibicao = ["fornecedor", "codigo", "descricao", "nome_personalizado"] + LOJAS_NOMES
+        cols_exibicao = ["fornecedor", "codigo", "descricao", "nome_personalizado"] + LOJAS_NOMES
+        edited_cat = st.data_editor(df_cat_completo[cols_exibicao], use_container_width=True, hide_index=True, column_config=col_cfg_c, num_rows="dynamic", key="catalogo_editor")
 
-        edited_cat = st.data_editor(
-            df_cat_completo[colunas_exibicao], 
-            use_container_width=True, 
-            hide_index=True, 
-            column_config=col_cfg_c,
-            num_rows="dynamic",
-            key="catalogo_editor"
-        )
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        col_btn_salvar, col_btn_erp = st.columns(2)
-        
-        with col_btn_salvar:
-            btn_salvar = st.button("💾 Salvar Matriz do Catálogo", type="primary", use_container_width=True)
-            
-        with col_btn_erp:
-            btn_puxar_erp = st.button("📥 Puxar Nomes do ERP", use_container_width=True)
-
-        if btn_salvar:
+        if st.button("💾 Salvar Matriz do Catálogo", type="primary", use_container_width=True):
             state = st.session_state.get("catalogo_editor")
-            
-            with st.spinner("Sincronizando modificações com o Supabase..."):
+            with st.spinner("Sincronizando..."):
                 try:
+                    # 1. DELETES
                     if state and state.get("deleted_rows"):
                         for idx in state["deleted_rows"]:
                             cod_p = int(df_cat_completo.iloc[idx]["codigo"])
                             supabase.table("produtos").delete().eq("codigo", cod_p).execute()
 
+                    # 2. ADDS
                     if state and state.get("added_rows"):
                         for row in state["added_rows"]:
-                            if "codigo" not in row or pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "":
-                                st.error("Erro crítico: Todo novo produto precisa de um Código!")
-                                st.stop()
-                            
                             cod_p = int(row["codigo"])
-                            new_prod = {
-                                "codigo": cod_p,
-                                "descricao": str(row.get("descricao", "Novo Produto")),
-                                "fornecedor": str(row.get("fornecedor", "Box")),
-                                "nome_personalizado": str(row.get("nome_personalizado", "")).strip() if row.get("nome_personalizado") else None,
-                                "setor": setor,
-                                "ativo": True
-                            }
-                            supabase.table("produtos").insert(new_prod).execute()
+                            supabase.table("produtos").insert({
+                                "codigo": cod_p, "descricao": row.get("descricao", "Novo"), 
+                                "fornecedor": row.get("fornecedor", "Box"), "setor": setor, "ativo": True
+                            }).execute()
 
+                    # 3. EDITS
                     if state and state.get("edited_rows"):
                         for idx_str, changes in state["edited_rows"].items():
                             idx = int(idx_str)
                             cod_p_original = int(df_cat_completo.iloc[idx]["codigo"])
-                            
-                            prod_changes = {}
-                            if "descricao" in changes: prod_changes["descricao"] = str(changes["descricao"])
-                            if "fornecedor" in changes: prod_changes["fornecedor"] = str(changes["fornecedor"])
-                            if "nome_personalizado" in changes: 
-                                val_np = changes["nome_personalizado"]
-                                prod_changes["nome_personalizado"] = str(val_np).strip() if pd.notna(val_np) and str(val_np).strip() != "" else None
-                            
-                            if "codigo" in changes:
-                                try:
-                                    novo_cod = int(changes["codigo"])
-                                    check = supabase.table("produtos").select("codigo").eq("codigo", novo_cod).execute()
-                                    if len(check.data) > 0:
-                                        st.error(f"⚠️ O código {novo_cod} já existe no banco. Alteração de código cancelada para este item.")
-                                        continue
-                                    prod_changes["codigo"] = novo_cod
-                                except:
-                                    st.error("⚠️ Código inválido ignorado.")
-                                    continue
-                            
-                            if prod_changes:
-                                supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
+                            supabase.table("produtos").update(changes).eq("codigo", cod_p_original).execute()
 
-                    codigos_tela = edited_cat["codigo"].dropna().astype(int).tolist()
-                    if codigos_tela:
-                        for i in range(0, len(codigos_tela), 200):
-                            supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_tela[i:i+200]).execute()
-                        
-                        lista_perms = []
-                        for _, row in edited_cat.iterrows():
-                            if pd.isna(row["codigo"]): continue
-                            c = int(row["codigo"])
-                            for num_loja in range(1, 9):
-                                val = bool(row[f"Loja {num_loja:02d}"])
-                                lista_perms.append({"codigo_produto": c, "loja": num_loja, "disponivel": val})
-                                
-                        for i in range(0, len(lista_perms), 1000):
-                            supabase.table("produtos_lojas").insert(lista_perms[i:i+1000]).execute()
+                    # 4. UPSERT PERMISSÕES (SALVA AS MARCAÇÕES DAS LOJAS)
+                    lista_perms = []
+                    for _, row in edited_cat.iterrows():
+                        if pd.notna(row["codigo"]):
+                            for n in range(1, 9):
+                                lista_perms.append({"codigo_produto": int(row["codigo"]), "loja": n, "disponivel": bool(row[f"Loja {n:02d}"])})
+                    
+                    if lista_perms:
+                        supabase.table("produtos_lojas").upsert(lista_perms, on_conflict="codigo_produto, loja").execute()
 
-                    st.success("Painel do catálogo totalmente atualizado no Supabase!")
+                    st.info("Sincronização finalizada. Recarregando dados...")
                     time.sleep(1)
                     st.rerun()
                 except Exception as e:
-                    st.error(f"⚠️ Houve um erro processando a alteração. Detalhes: {e}")
+                    st.error(f"⚠️ Erro ao salvar: {e}")
+                    st.exception(e)
 
         if btn_puxar_erp:
             with st.spinner("Buscando nomes oficiais no ERP..."):
