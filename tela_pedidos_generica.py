@@ -466,7 +466,7 @@ def iniciar_tela(setor: str):
             st.success("Gravado!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 3 — VISÃO FORNECEDORES
+    # ROTA 3 — VISÃO FORNECEDORES (RESUMO EDITÁVEL)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Visão Fornecedores (Resumo)":
         st.markdown(f"## 🚚 Resumo Consolidado por Fornecedor — {setor}")
@@ -531,7 +531,6 @@ def iniciar_tela(setor: str):
         for forn in sorted(df_mestre["fornecedor"].dropna().unique()):
             df_forn_bruto = df_mestre[df_mestre["fornecedor"] == forn]
             
-            # LÓGICA DINÂMICA: Mantém apenas as lojas que não estão 100% bloqueadas para este fornecedor
             lojas_ativas = [l for l in LOJAS_NOMES if not (df_forn_bruto[l] == "-").all()]
             
             df_forn_view = df_forn_bruto[["codigo", "codigo_erp", "descricao"] + lojas_ativas + ["TOTAL GERAL"]].rename(columns={'codigo_erp': 'Cód. ERP', 'descricao': 'Produto'}).sort_values(by='Produto')
@@ -539,18 +538,18 @@ def iniciar_tela(setor: str):
             with st.container(border=True):
                 st.markdown(f"##### Fornecedor: {forn}")
                 col_cfg_f = {
-                    "codigo": None, # PK invisível
+                    "codigo": None,
                     "Cód. ERP": st.column_config.NumberColumn(disabled=True, width=80, format="%d"),
-                    "Produto": st.column_config.TextColumn(disabled=True, width=200),
+                    "Produto": st.column_config.TextColumn(disabled=True, width=250),
                     "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
                 }
                 
-                # Configura apenas as colunas das lojas ativas
-                for l in lojas_ativas: col_cfg_f[l] = st.column_config.TextColumn(l, width=75, disabled=False)
+                # Ajustei a largura das lojas para 60px para ficar mais compacto
+                for l in lojas_ativas: col_cfg_f[l] = st.column_config.TextColumn(l, width=60, disabled=False)
                     
-                edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=True, column_config=col_cfg_f, key=f"editor_forn_{forn}")
+                # 🟢 MUDANÇA AQUI: use_container_width=False para a tabela não esticar loucamente
+                edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
-                # Devolve as colunas ocultas como "-" por baixo dos panos para garantir o salvamento correto
                 for l in LOJAS_NOMES:
                     if l not in edit_df.columns:
                         edit_df[l] = "-"
