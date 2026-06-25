@@ -623,7 +623,7 @@ def iniciar_tela(setor: str):
                 st.success("Alterações de fornecedores consolidadas com sucesso!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 4 — CATÁLOGO DE PRODUTOS
+    # ROTA 4 — CATÁLOGO DE PRODUTOS (COM AUTOMAÇÃO INTELIGENTE DE CÓDIGOS)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Catálogo de Produtos":
         st.markdown(f"## 🗂️ Gestão de Catálogo e Permissões por Loja — {setor}")
@@ -696,20 +696,59 @@ def iniciar_tela(setor: str):
         if btn_salvar:
             state = st.session_state.get("catalogo_editor")
             
-            with st.spinner("Processando alterações e garantindo inserções..."):
+            with st.spinner("Automação Inteligente processando seu catálogo..."):
                 try:
-                    codigos_banco = df_prod['codigo'].tolist() if not df_prod.empty else []
-                    codigos_na_tela = edited_cat['codigo'].dropna().astype(int).tolist()
+                    # Carrega banco global para checar duplicações
+                    resp_all = supabase.table("produtos").select("codigo").execute()
+                    codigos_globais = [p["codigo"] for p in resp_all.data] if resp_all.data else []
+                    
+                    # Mapa para rastrear o que o Python mudou de código para não perder as permissões
+                    mapa_conflitos = {}
 
+                    # 1. DELETES
                     if state and state.get("deleted_rows"):
                         for idx in state["deleted_rows"]:
                             cod_p = int(df_cat_completo.iloc[idx]["codigo"])
                             supabase.table("produtos").delete().eq("codigo", cod_p).execute()
+                            if cod_p in codigos_globais: codigos_globais.remove(cod_p)
 
+                    # 2. ADIÇÕES (Tratamento Mágico de Códigos)
+                    if state and state.get("added_rows"):
+                        for row in state["added_rows"]:
+                            cod_digitado = row.get("codigo")
+                            if pd.isna(cod_digitado) or str(cod_digitado).strip() == "":
+                                st.error("⚠️ Um dos novos produtos está sem código! Ignorando a linha.")
+                                continue
+                                
+                            cod_final = int(cod_digitado)
+                            forn_add = str(row.get("fornecedor", "Box")).strip()
+                            desc_add = str(row.get("descricao", "Novo Produto")).strip()
+                            np_add = str(row.get("nome_personalizado", "")).strip() if row.get("nome_personalizado") else None
+                            
+                            # Magia da Opção 2: Gerar Sufixo
+                            if cod_final in codigos_globais:
+                                base_str = str(cod_final)
+                                for i in range(1, 100):
+                                    tent = int(f"{base_str}{i:02d}")
+                                    if tent not in codigos_globais:
+                                        cod_final = tent
+                                        break
+                                st.toast(f"🤖 O código {cod_digitado} já existia. Salvo como {cod_final} para não dar conflito!", icon="✨")
+                            
+                            mapa_conflitos[(int(cod_digitado), forn_add)] = cod_final
+                            
+                            supabase.table("produtos").insert({
+                                "codigo": cod_final, "descricao": desc_add, "fornecedor": forn_add, 
+                                "nome_personalizado": np_add, "setor": setor, "ativo": True
+                            }).execute()
+                            codigos_globais.append(cod_final)
+
+                    # 3. EDIÇÕES
                     if state and state.get("edited_rows"):
                         for idx_str, changes in state["edited_rows"].items():
                             idx = int(idx_str)
                             cod_p_original = int(df_cat_completo.iloc[idx]["codigo"])
+                            forn_original = str(df_cat_completo.iloc[idx]["fornecedor"])
                             
                             prod_changes = {}
                             if "descricao" in changes: prod_changes["descricao"] = str(changes["descricao"])
@@ -720,59 +759,59 @@ def iniciar_tela(setor: str):
                             
                             if "codigo" in changes:
                                 try:
-                                    novo_cod = int(changes["codigo"])
-                                    check = supabase.table("produtos").select("codigo").eq("codigo", novo_cod).execute()
-                                    if len(check.data) > 0:
-                                        st.error(f"⚠️ O código {novo_cod} já existe no banco. Alteração de código cancelada.")
-                                        continue
-                                    prod_changes["codigo"] = novo_cod
-                                    codigos_banco.append(novo_cod)
+                                    cod_digitado = int(changes["codigo"])
+                                    cod_final = cod_digitado
+                                    forn_atual = prod_changes.get("fornecedor", forn_original)
+                                    
+                                    if cod_final in codigos_globais and cod_final != cod_p_original:
+                                        base_str = str(cod_final)
+                                        for i in range(1, 100):
+                                            tent = int(f"{base_str}{i:02d}")
+                                            if tent not in codigos_globais:
+                                                cod_final = tent
+                                                break
+                                        st.toast(f"🤖 Edição Inteligente! O código virou {cod_final}.", icon="✨")
+                                    
+                                    mapa_conflitos[(cod_digitado, forn_atual)] = cod_final
+                                    prod_changes["codigo"] = cod_final
+                                    codigos_globais.append(cod_final)
                                 except:
-                                    st.error("⚠️ Código inválido ignorado.")
+                                    st.error("⚠️ Código editado inválido ignorado.")
                                     continue
                             
                             if prod_changes:
                                 supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
+                    # 4. UPSERT DAS PERMISSÕES (Rastreando os códigos que mudaram)
+                    lista_perms_geral = []
+                    codigos_processados_perms = set()
+                    
                     for _, row in edited_cat.iterrows():
-                        if pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "":
-                            continue
+                        c_tela = row.get("codigo")
+                        if pd.isna(c_tela) or str(c_tela).strip() == "": continue
                         
-                        c = int(row["codigo"])
-                        if c not in codigos_banco:
-                            desc_add = str(row["descricao"]) if pd.notna(row["descricao"]) and str(row["descricao"]).strip() != "" else "Novo Produto"
-                            forn_add = str(row["fornecedor"]) if pd.notna(row["fornecedor"]) and str(row["fornecedor"]).strip() != "" else "Box"
-                            np_add = str(row["nome_personalizado"]).strip() if pd.notna(row["nome_personalizado"]) and str(row["nome_personalizado"]).strip() != "" else None
+                        c_tela = int(c_tela)
+                        f_tela = str(row.get("fornecedor", "")).strip()
+                        
+                        # Descobre se o Python mudou esse código no background
+                        c_final = mapa_conflitos.get((c_tela, f_tela), c_tela)
+                        
+                        codigos_processados_perms.add(c_final)
+                        for num_loja in range(1, 9):
+                            val_loja = bool(row.get(f"Loja {num_loja:02d}", True))
+                            lista_perms_geral.append({"codigo_produto": c_final, "loja": num_loja, "disponivel": val_loja})
+
+                    # Limpa e Grava Permissões Seguras
+                    codigos_lista = list(codigos_processados_perms)
+                    if codigos_lista:
+                        for i in range(0, len(codigos_lista), 200):
+                            supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_lista[i:i+200]).execute()
                             
-                            new_prod = {
-                                "codigo": c,
-                                "descricao": desc_add,
-                                "fornecedor": forn_add,
-                                "nome_personalizado": np_add,
-                                "setor": setor,
-                                "ativo": True
-                            }
-                            supabase.table("produtos").insert(new_prod).execute()
-                            codigos_banco.append(c)
+                        for i in range(0, len(lista_perms_geral), 1000):
+                            supabase.table("produtos_lojas").insert(lista_perms_geral[i:i+1000]).execute()
 
-                    if codigos_na_tela:
-                        for i in range(0, len(codigos_na_tela), 200):
-                            supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_na_tela[i:i+200]).execute()
-                        
-                        lista_perms = []
-                        for _, row in edited_cat.iterrows():
-                            if pd.isna(row["codigo"]) or str(row["codigo"]).strip() == "": 
-                                continue
-                            c = int(row["codigo"])
-                            for num_loja in range(1, 9):
-                                val_loja = bool(row[f"Loja {num_loja:02d}"])
-                                lista_perms.append({"codigo_produto": c, "loja": num_loja, "disponivel": val_loja})
-                                
-                        for i in range(0, len(lista_perms), 1000):
-                            supabase.table("produtos_lojas").insert(lista_perms[i:i+1000]).execute()
-
-                    st.success("Painel do catálogo totalmente atualizado no Supabase!")
-                    time.sleep(1)
+                    st.success("✅ Automação concluída! Catálogo e Permissões atualizados.")
+                    time.sleep(1.5)
                     st.rerun()
                 except Exception as e:
                     st.error(f"⚠️ Houve um erro processando a alteração. Detalhes: {e}")
@@ -782,7 +821,6 @@ def iniciar_tela(setor: str):
             with st.spinner("Buscando nomes oficiais no ERP..."):
                 try:
                     cods = [int(cod) for cod in edited_cat["codigo"].tolist() if pd.notna(cod) and str(cod).strip() != ""]
-                    
                     if not cods:
                         st.warning("Nenhum código de produto encontrado na tabela.")
                     else:
@@ -795,13 +833,11 @@ def iniciar_tela(setor: str):
                                 cod_erp = int(row["cod"])
                                 desc_erp = str(row["descricao"])
                                 supabase.table("produtos").update({"descricao": desc_erp}).eq("codigo", cod_erp).execute()
-                            
                             st.success("✅ Nomes Oficiais sincronizados com sucesso da sua View!")
                             time.sleep(1)
                             st.rerun()
                         else:
                             st.info("Nenhum nome encontrado no ERP para os códigos atuais.")
-                            
                 except Exception as e:
                     if "No database configured" in str(e) or "missing" in str(e).lower():
                         st.error("⚠️ Aviso: Credenciais do PostgreSQL não configuradas ou inacessíveis.")
