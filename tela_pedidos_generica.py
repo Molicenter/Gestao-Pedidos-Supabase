@@ -86,7 +86,8 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30], startrow=1)
         worksheet = writer.sheets[nome_aba[:30]]
 
-        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
+        # 🔥 CORES E BORDAS ATUALIZADAS (AZUL AMENO E TRACEJADO BRANCO) 🔥
+        fill_header = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid") # Azul mais suave
         fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         
         font_header = Font(color="FFFFFF", bold=True)
@@ -94,6 +95,10 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         
         border_thin = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'),
                              top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
+        
+        # Borda especial branca tracejada apenas para cabeçalhos
+        border_header = Border(left=Side(style='dashed', color='FFFFFF'), right=Side(style='dashed', color='FFFFFF'),
+                               top=Side(style='dashed', color='FFFFFF'), bottom=Side(style='dashed', color='FFFFFF'))
         
         align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
@@ -119,10 +124,11 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
             if "TOTAL" in col_name:
                 col_total_idx = col_num
 
+        # Aplicando estilo Tracejado Branco no Cabeçalho
         for col_num, cell in enumerate(worksheet[2], 1):
             cell.fill = fill_header
             cell.font = font_header
-            cell.border = border_thin
+            cell.border = border_header
             cell.alignment = align_center
 
         for row_num, row in enumerate(worksheet.iter_rows(min_row=3, max_row=worksheet.max_row, min_col=1, max_col=worksheet.max_column), 3):
@@ -178,13 +184,18 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         worksheet = writer.book.create_sheet(nome_aba[:30])
         writer.book.active = worksheet
         
-        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
+        # 🔥 CORES E BORDAS ATUALIZADAS 🔥
+        fill_header = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
         fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
         font_normal = Font(bold=False)
         border_thin = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'),
                              top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
+                             
+        border_header = Border(left=Side(style='dashed', color='FFFFFF'), right=Side(style='dashed', color='FFFFFF'),
+                               top=Side(style='dashed', color='FFFFFF'), bottom=Side(style='dashed', color='FFFFFF'))
+                               
         align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
@@ -214,7 +225,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
             cell = worksheet.cell(row=1, column=col_idx)
             cell.fill = fill_header
             cell.font = font_header
-            cell.border = border_thin
+            cell.border = border_header
             cell.alignment = align_center
 
         current_row = 2
@@ -236,7 +247,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
                 cell = worksheet.cell(row=current_row, column=col_idx)
                 cell.fill = fill_header
                 cell.font = font_header
-                cell.border = border_thin
+                cell.border = border_header
                 cell.alignment = align_center
             
             current_row += 1
@@ -365,42 +376,32 @@ def iniciar_tela(setor: str):
             border-color: #ff4b4b !important;
         }
         
-        /* 🔥 A MÁGICA DA IMPRESSÃO ACONTECE AQUI 🔥 */
         @media screen {
-            .print-only { display: none !important; } /* Invisível na tela do computador */
+            .print-only { display: none !important; } 
         }
         
+        /* 🔥 CSS OTMIZADO PARA COMPRESSÃO DE ESPAÇOS NA IMPRESSÃO 🔥 */
         @media print {
-            /* 1. MATA A NAVEGAÇÃO E BARRAS DE FERRAMENTAS ABSOLUTAMENTE */
             section[data-testid="stSidebar"], 
             header[data-testid="stHeader"], 
             footer, 
-            [data-testid="stToolbar"] {
-                display: none !important;
-                width: 0 !important;
-                height: 0 !important;
-            }
-            
-            /* 2. REMOVE OS "EXTRAS" DO STREAMLIT (Filtros, Botões soltos, Alertas e Colunas de Status) */
+            [data-testid="stToolbar"],
             button, .stButton, 
             [data-testid="stMetric"], 
             [data-testid="stRadio"], 
             [data-testid="stSelectbox"], 
             [data-testid="stTextInput"], 
             [data-testid="stAlert"],
-            [data-testid="column"] {
-                display: none !important;
-            }
-            
-            /* 3. OCULTA OS TÍTULOS ORIGINAIS E A TABELA INTERATIVA (CANVAS) */
+            [data-testid="column"],
             h1, h2, h5, h6, 
             [data-testid="stDataEditor"], 
             [data-testid="stDataFrame"],
             .no-print {
                 display: none !important;
+                width: 0 !important;
+                height: 0 !important;
             }
             
-            /* 4. ZERA TODAS AS MARGENS PARA A TABELA ESTICAR NA FOLHA A4 */
             html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], .block-container {
                 background-color: white !important;
                 margin: 0 !important;
@@ -410,44 +411,59 @@ def iniciar_tela(setor: str):
                 overflow: visible !important;
             }
             
-            /* 5. REVELA E ESTILIZA A NOSSA TABELA HTML NATIVA */
             .print-only {
                 display: block !important;
             }
             
-            .print-only h3, .print-only h4 {
+            .print-only h3 {
+                font-size: 12pt !important;
+                margin: 0 0 5px 0 !important;
                 color: black !important;
-                margin-top: 0px !important;
-                margin-bottom: 10px !important;
-                font-size: 18px !important;
-                display: block !important;
             }
             
+            /* Título do fornecedor grudado na tabela como um bloco contínuo */
+            .print-only h4.supplier-header {
+                font-size: 9.5pt !important;
+                margin: 0 !important;
+                padding: 4px 6px !important;
+                background-color: #e0e0e0 !important;
+                border: 1px solid black !important;
+                border-bottom: none !important;
+                color: black !important;
+                text-align: left !important;
+            }
+            
+            /* Tabela ultra-comprimida */
             table.print-table {
                 width: 100%;
                 border-collapse: collapse;
                 font-family: Arial, sans-serif;
-                font-size: 11px;
-                margin-bottom: 25px;
+                font-size: 8.5pt !important; /* Fonte pequena para caber mais */
+                margin-top: 0 !important;
+                margin-bottom: 12px !important; /* Espaço mínimo entre fornecedores */
                 page-break-inside: auto;
             }
+            
             table.print-table tr {
                 page-break-inside: avoid;
                 page-break-after: auto;
             }
+            
             table.print-table th, table.print-table td {
                 border: 1px solid black !important;
-                padding: 6px;
+                padding: 2px 4px !important; /* Redução drástica de padding */
                 color: black !important;
+                line-height: 1.1 !important; /* Texto mais junto */
                 text-align: center;
             }
+            
             table.print-table th {
                 background-color: #f0f2f6 !important;
                 font-weight: bold;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
-            /* Alinhamento da descrição do produto à esquerda */
+            
             table.print-table td:nth-child(2), table.print-table td:nth-child(3), table.print-table td:nth-child(4) {
                 text-align: left;
             }
@@ -647,7 +663,6 @@ def iniciar_tela(setor: str):
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
-        # 🔥 INJEÇÃO DA TABELA HTML INVISÍVEL PARA IMPRESSÃO PERFEITA 🔥
         html_table = df_exibicao.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
         st.markdown(f'<div class="print-only"><h3>📊 Separação e Fechamento — {setor} ({filtro_selecionado})</h3>{html_table}</div>', unsafe_allow_html=True)
 
@@ -773,7 +788,6 @@ def iniciar_tela(setor: str):
 
         grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=True, key=f"grid_loja_{num_loja}")
 
-        # 🔥 INJEÇÃO DA TABELA HTML INVISÍVEL PARA IMPRESSÃO PERFEITA 🔥
         html_table = df_filtrado.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
         st.markdown(f'<div class="print-only"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3>{html_table}</div>', unsafe_allow_html=True)
 
@@ -877,7 +891,7 @@ def iniciar_tela(setor: str):
             df_forn_view = df_forn_bruto[["codigo", "codigo_erp", "descricao"] + lojas_ativas + ["TOTAL GERAL"]].rename(columns={'codigo_erp': 'Cód. ERP', 'descricao': 'Produto'}).sort_values(by='Produto')
             
             with st.container(border=True):
-                st.markdown(f"##### Fornecedor: {forn}")
+                st.markdown(f"<div class='no-print'><h5>Fornecedor: {forn}</h5></div>", unsafe_allow_html=True)
                 col_cfg_f = {
                     "codigo": None,
                     "Cód. ERP": st.column_config.NumberColumn(disabled=True, width=80, format="%d"),
@@ -889,9 +903,9 @@ def iniciar_tela(setor: str):
                     
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
-                # 🔥 INJEÇÃO DA TABELA HTML INVISÍVEL POR FORNECEDOR 🔥
+                # 🔥 INJEÇÃO OTIMIZADA DO HTML (COLADO NO FORNECEDOR) 🔥
                 html_table = df_forn_view.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
-                st.markdown(f'<div class="print-only" style="page-break-inside: avoid;"><h4>🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="print-only" style="page-break-inside: avoid;"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
                 
                 for l in LOJAS_NOMES:
                     if l not in edit_df.columns: 
@@ -989,7 +1003,6 @@ def iniciar_tela(setor: str):
         cols_exibicao = ["fornecedor", "codigo", "codigo_erp", "descricao", "nome_personalizado"] + LOJAS_NOMES
         edited_cat = st.data_editor(df_cat_completo[cols_exibicao], use_container_width=True, hide_index=True, column_config=col_cfg_c, num_rows="dynamic", key="catalogo_editor")
 
-        # 🔥 INJEÇÃO DA TABELA HTML INVISÍVEL NO CATÁLOGO 🔥
         html_table = df_cat_completo[cols_exibicao].drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
         st.markdown(f'<div class="print-only"><h3>🗂️ Catálogo Geral — {setor}</h3>{html_table}</div>', unsafe_allow_html=True)
 
@@ -1018,7 +1031,6 @@ def iniciar_tela(setor: str):
                             supabase.table("pedidos").delete().eq("codigo_produto", cod_p).execute()
                             supabase.table("medias_90d").delete().eq("codigo_produto", cod_p).execute()
                             supabase.table("produtos").delete().eq("codigo", cod_p).execute()
-                            
                             if cod_p in codigos_globais: codigos_globais.remove(cod_p)
                             if cod_p in codigos_conhecidos: codigos_conhecidos.remove(cod_p)
 
@@ -1026,7 +1038,6 @@ def iniciar_tela(setor: str):
                         for idx_str, changes in state["edited_rows"].items():
                             idx = int(idx_str)
                             cod_p_original = int(df_cat_completo.iloc[idx]["codigo"])
-                            
                             prod_changes = {}
                             if "descricao" in changes: 
                                 prod_changes["descricao"] = str(changes["descricao"])
@@ -1038,24 +1049,19 @@ def iniciar_tela(setor: str):
                             if "codigo_erp" in changes:
                                 try: prod_changes["codigo_erp"] = int(changes["codigo_erp"])
                                 except: pass
-                                
                             if prod_changes: 
                                 supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
                     for _, row in edited_cat.iterrows():
                         c_pk = row.get("codigo")
                         c_erp = row.get("codigo_erp") 
-                        
                         if pd.isna(c_pk) or str(c_pk).strip() == "":
-                            if pd.isna(c_erp) or str(c_erp).strip() == "": 
-                                continue
-                                
+                            if pd.isna(c_erp) or str(c_erp).strip() == "": continue
                             cod_erp_digitado = int(c_erp)
                             cod_final = cod_erp_digitado
                             forn_add = str(row.get("fornecedor", "Box")).strip()
                             desc_add = str(row.get("descricao", "Novo Produto")).strip()
                             np_add = str(row.get("nome_personalizado", "")).strip() if pd.notna(row.get("nome_personalizado")) and str(row.get("nome_personalizado")).strip() != "" else None
-                            
                             if cod_final in codigos_globais:
                                 base_str = str(cod_final)
                                 for i in range(1, 100):
@@ -1064,17 +1070,13 @@ def iniciar_tela(setor: str):
                                         cod_final = tent
                                         break
                                 st.toast(f"🤖 Gerado código interno invisível {cod_final} para o item {cod_erp_digitado} do ERP.", icon="✨")
-                                
                             mapa_conflitos[(cod_erp_digitado, forn_add)] = cod_final
-                            
                             supabase.table("produtos").insert({
                                 "codigo": cod_final, "codigo_erp": cod_erp_digitado,
                                 "descricao": desc_add, "fornecedor": forn_add, 
                                 "nome_personalizado": np_add, "setor": setor, "ativo": True
                             }).execute()
-                            
-                            codigos_globais.append(cod_final)
-                            codigos_conhecidos.add(cod_final)
+                            codigos_globais.append(cod_final); codigos_conhecidos.add(cod_final)
 
                     lista_perms_geral = []
                     codigos_processados_perms = set()
@@ -1083,14 +1085,9 @@ def iniciar_tela(setor: str):
                         c_pk = row.get("codigo")
                         c_erp = row.get("codigo_erp")
                         f_tela = str(row.get("fornecedor", "")).strip()
-                        
-                        if pd.notna(c_pk) and str(c_pk).strip() != "": 
-                            c_final = int(c_pk)
-                        else: 
-                            c_final = mapa_conflitos.get((int(c_erp), f_tela), None)
-                            
-                        if not c_final: 
-                            continue
+                        if pd.notna(c_pk) and str(c_pk).strip() != "": c_final = int(c_pk)
+                        else: c_final = mapa_conflitos.get((int(c_erp), f_tela), None)
+                        if not c_final: continue
                         
                         codigos_processados_perms.add(c_final)
                         for num_loja in range(1, 9):
@@ -1099,23 +1096,17 @@ def iniciar_tela(setor: str):
 
                     codigos_lista = list(codigos_processados_perms)
                     if codigos_lista:
-                        for i in range(0, len(codigos_lista), 200): 
-                            supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_lista[i:i+200]).execute()
-                        for i in range(0, len(lista_perms_geral), 1000): 
-                            supabase.table("produtos_lojas").insert(lista_perms_geral[i:i+1000]).execute()
+                        for i in range(0, len(codigos_lista), 200): supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_lista[i:i+200]).execute()
+                        for i in range(0, len(lista_perms_geral), 1000): supabase.table("produtos_lojas").insert(lista_perms_geral[i:i+1000]).execute()
 
-                    st.success("✅ Automação concluída!")
-                    time.sleep(1.5)
-                    st.rerun()
-                except Exception as e: 
-                    st.error(f"⚠️ Erro processando: {e}")
+                    st.success("✅ Automação concluída!"); time.sleep(1.5); st.rerun()
+                except Exception as e: st.error(f"⚠️ Erro processando: {e}")
 
         if btn_puxar_erp:
             with st.spinner("Buscando nomes oficias usando Cód. ERP..."):
                 try:
                     cods_erp = [int(c) for c in edited_cat["codigo_erp"].tolist() if pd.notna(c) and str(c).strip() != ""]
-                    if not cods_erp: 
-                        st.warning("Nenhum código encontrado.")
+                    if not cods_erp: st.warning("Nenhum código encontrado.")
                     else:
                         cods_str = ", ".join(map(str, set(cods_erp)))
                         query_nomes = f"SELECT cod, descricao FROM python_ajuste_cadastro WHERE cod IN ({cods_str})"
@@ -1126,13 +1117,8 @@ def iniciar_tela(setor: str):
                                 cod_oficial = int(row["cod"])
                                 desc_erp = str(row["descricao"])
                                 supabase.table("produtos").update({"descricao": desc_erp}).eq("codigo_erp", cod_oficial).execute()
-                            st.success("✅ Nomes atualizados em todos os fornecedores!")
-                            time.sleep(1)
-                            st.rerun()
-                        else: 
-                            st.info("Nenhum nome encontrado.")
+                            st.success("✅ Nomes atualizados em todos os fornecedores!"); time.sleep(1); st.rerun()
+                        else: st.info("Nenhum nome encontrado.")
                 except Exception as e:
-                    if "No database configured" in str(e) or "missing" in str(e).lower(): 
-                        st.error("⚠️ Aviso: Credenciais do PostgreSQL não configuradas ou inacessíveis.")
-                    else: 
-                        st.error(f"⚠️ Erro ao buscar nomes no banco ERP: {e}")
+                    if "No database configured" in str(e) or "missing" in str(e).lower(): st.error("⚠️ Aviso: Credenciais do PostgreSQL não configuradas ou inacessíveis.")
+                    else: st.error(f"⚠️ Erro ao buscar nomes no banco ERP: {e}")
