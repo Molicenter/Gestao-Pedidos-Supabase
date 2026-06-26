@@ -344,43 +344,44 @@ def iniciar_tela(setor: str):
             border-color: #d33333 !important;
         }
 
-        /* 🖨️ MODO IMPRESSÃO SUPER AGRESSIVO (Quebra o Blank Page do Streamlit) */
+        /* 🖨️ CSS DEFINITIVO PARA IMPRESSÃO STREAMLIT */
         @media print {
-            /* 1. Ocultar menus, botões nativos e cabeçalhos desnecessários */
-            header, [data-testid="stSidebar"], button, .stButton, [data-testid="stToolbar"] {
+            /* 1. Esconde a Sidebar, botões e barras de ferramentas */
+            header, [data-testid="stSidebar"], [data-testid="stToolbar"], button, .stButton {
                 display: none !important;
             }
-
-            /* 2. Destravar ABSOLUTAMENTE TODAS as caixas virtuais que cortam o conteúdo */
-            html, body, #root, .appview-container, .main, 
-            [data-testid="stApp"], [data-testid="stMain"], 
-            [data-testid="stMainBlockContainer"], .block-container {
-                position: relative !important;
-                display: block !important;
+            
+            /* 2. Destrava TODAS as "caixas" do Streamlit que cortam a tela */
+            html, body, #root, .stApp, [data-testid="stAppViewContainer"], 
+            [data-testid="stMain"], [data-testid="stMainBlockContainer"], .block-container,
+            div[data-testid="stVerticalBlock"] {
                 height: auto !important;
-                min-height: auto !important;
-                width: 100% !important;
+                min-height: 100% !important;
+                width: auto !important;
                 max-width: 100% !important;
                 overflow: visible !important;
-                margin: 0 !important;
-                padding: 10px !important;
+                position: relative !important;
+                display: block !important;
                 background-color: white !important;
+                margin: 0 !important;
+                padding: 0 !important;
             }
-
-            /* 3. Forçar texto preto em TUDO para o papel */
+            
+            /* 3. Força todos os textos a ficarem pretos */
             * {
                 color: black !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
-
-            /* 4. Inversão "Mágica" do Canvas do Data Editor (fundo preto vira branco) */
-            canvas {
-                filter: invert(1) hue-rotate(180deg) brightness(1.2) !important;
-                display: block !important;
-                position: relative !important;
+            
+            /* 4. Tira a limitação de altura da tabela e inverte a cor do Canvas */
+            [data-testid="stDataEditor"], [data-testid="stDataFrame"] {
+                height: auto !important;
                 overflow: visible !important;
-                max-width: 100% !important;
+            }
+            canvas {
+                filter: invert(1) hue-rotate(180deg) brightness(1.1) !important;
+                display: block !important;
             }
         }
         </style>
