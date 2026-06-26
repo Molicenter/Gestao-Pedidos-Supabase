@@ -181,6 +181,16 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         worksheet.page_setup.fitToWidth = 1
         worksheet.page_setup.fitToHeight = 0 
 
+        # 📏 CONFIGURAÇÃO DE MARGENS (1 cm = 1 / 2.54 polegadas)
+        worksheet.page_margins.left = 1 / 2.54
+        worksheet.page_margins.right = 1 / 2.54
+        worksheet.page_margins.top = 1 / 2.54
+        worksheet.page_margins.bottom = 1 / 2.54
+        
+        # Ajustando cabeçalho e rodapé para não encavalar com a margem (0.5 cm)
+        worksheet.page_margins.header = 0.5 / 2.54
+        worksheet.page_margins.footer = 0.5 / 2.54
+
     return output.getvalue()
 
 def injetar_botao_impressao():
