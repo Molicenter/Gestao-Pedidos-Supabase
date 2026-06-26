@@ -13,8 +13,16 @@ from openpyxl.utils import get_column_letter
 
 LOJAS_NOMES = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
 
+@st.cache_resource
 def obter_supabase() -> Client:
+    # cache_resource: reaproveita o MESMO cliente entre reruns/sessões em vez de
+    # criar uma conexão nova a cada clique. Ganho direto de velocidade.
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+
+def data_brasilia() -> date:
+    # Data no fuso de Brasília (UTC-3 fixo). O servidor roda em UTC, então sem isso
+    # um pedido lançado à noite cairia no dia seguinte.
+    return (datetime.now(timezone.utc) - timedelta(hours=3)).date()
 
 def data_hora_brasilia() -> str:
     # O servidor do Streamlit Cloud roda em UTC. Como Londrina/Brasília é UTC-3 fixo
@@ -107,7 +115,7 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-        hoje_str = date.today().strftime("%d/%m/%Y")
+        hoje_str = data_brasilia().strftime("%d/%m/%Y")
         worksheet["A1"] = f"Pedidos do dia {hoje_str}"
         worksheet["A1"].font = font_bold
 
@@ -217,7 +225,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         for col_idx in range(3, 12): 
             worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
 
-        hoje_str = date.today().strftime("%d/%m/%Y")
+        hoje_str = data_brasilia().strftime("%d/%m/%Y")
         worksheet["A1"] = "Tipo"
         worksheet["B1"] = "Descrição"
         worksheet["C1"] = f"Pedidos do dia {hoje_str}"
@@ -344,19 +352,56 @@ def exibir_status_digitacao_lojas(df_pedidos_hoje):
                 st.markdown(f"<div class='no-print' style='text-align:center; background-color:#f8d7da; color:#721c24; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>❌ Faltando</div>", unsafe_allow_html=True)
     st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
 
-def buscar_permissoes_setor(supabase_client, codigos_setor, num_loja=None):
+@st.cache_data(ttl=300, show_spinner=False)
+def buscar_permissoes_setor(_supabase_client, codigos_setor, num_loja=None):
+    # _supabase_client com underscore: o Streamlit NÃO tenta "hashear" o cliente.
+    # A chave do cache é (codigos_setor, num_loja). TTL de 5 min; invalidado na hora
+    # via st.cache_data.clear() quando o catálogo/permissões mudam.
     if not codigos_setor: 
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["codigo_produto", "loja", "disponivel"])
     dfs = []
     for i in range(0, len(codigos_setor), 200):
         lote = codigos_setor[i:i+200]
-        query = supabase_client.table("produtos_lojas").select("codigo_produto, loja, disponivel").in_("codigo_produto", lote)
+        query = _supabase_client.table("produtos_lojas").select("codigo_produto, loja, disponivel").in_("codigo_produto", lote)
         if num_loja is not None: 
             query = query.eq("loja", num_loja)
         resp = query.execute()
         if resp.data: 
             dfs.append(pd.DataFrame(resp.data))
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=["codigo_produto", "loja", "disponivel"])
+
+@st.cache_data(ttl=300, show_spinner=False)
+def carregar_produtos(setor: str, somente_ativos: bool = False) -> pd.DataFrame:
+    # Catálogo do setor (muda pouco durante o dia). Cacheado por (setor, somente_ativos).
+    supabase = obter_supabase()
+    q = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor)
+    if somente_ativos:
+        q = q.eq("ativo", True)
+    resp = q.execute()
+    return pd.DataFrame(resp.data)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def carregar_medias(num_loja: int) -> pd.DataFrame:
+    # Médias 90d da loja. Só mudam quando o admin puxa do ERP (que limpa o cache).
+    supabase = obter_supabase()
+    resp = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
+    return pd.DataFrame(resp.data)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🛡️ PROTEÇÃO CONTRA PERDA DE DIGITAÇÃO (avisa antes de fechar/recarregar a aba)
+# ─────────────────────────────────────────────────────────────────────────────
+def guardar_contra_saida(tem_alteracoes: bool):
+    if tem_alteracoes:
+        st.warning("⚠️ Há alterações **não salvas** nesta tela. Clique em **Salvar** antes de sair, recarregar ou trocar de tela.")
+        st.components.v1.html(
+            "<script>window.parent.onbeforeunload=function(e){e.preventDefault();e.returnValue='';return '';};</script>",
+            height=0,
+        )
+    else:
+        st.components.v1.html(
+            "<script>window.parent.onbeforeunload=null;</script>",
+            height=0,
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🧠 FUNÇÃO DIRETORA DO MÓDULO UNIFICADO
@@ -667,6 +712,7 @@ def iniciar_tela(setor: str):
                                         supabase.table("medias_90d").insert(lista_insert[i:i+1000]).execute()
                                         
                                     st.success(f"Médias ({view_escolhida}) sincronizadas!")
+                                    st.cache_data.clear()  # médias mudaram → recarrega na hora
                                     time.sleep(1.5)
                                     st.rerun()
                             else: 
@@ -688,7 +734,7 @@ def iniciar_tela(setor: str):
                 with c1:
                     if st.button("✔️ Sim", type="primary", use_container_width=True):
                         with st.spinner("Limpando..."): 
-                            supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(date.today())).execute()
+                            supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
                         st.session_state['confirmar_limpeza'] = False
                         st.rerun()
                 with c2:
@@ -702,10 +748,9 @@ def iniciar_tela(setor: str):
     if perfil_navegacao == "Separação e Fechamento":
         st.markdown(f"<div class='no-print'><h2>📊 Separação e Fechamento — {setor}</h2></div>", unsafe_allow_html=True)
         
-        resp_prod = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
-        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
+        df_prod = carregar_produtos(setor).copy()
+        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
         
-        df_prod = pd.DataFrame(resp_prod.data)
         df_ped = pd.DataFrame(resp_ped.data)
         
         if df_prod.empty: 
@@ -788,7 +833,12 @@ def iniciar_tela(setor: str):
         for loja in LOJAS_NOMES: 
             col_cfg[loja] = st.column_config.TextColumn(loja, width=75, disabled=False)
         
-        df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
+        df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg, key="editor_separacao")
+
+        # 🛡️ Detecta alterações não salvas comparando as colunas de loja (original x editado)
+        orig_sep = df_exibicao[LOJAS_NOMES].fillna("").astype(str).values.tolist()
+        edit_sep = df_editado[LOJAS_NOMES].fillna("").astype(str).values.tolist()
+        guardar_contra_saida(orig_sep != edit_sep)
         
         # 🔥 AJUSTE — troca as células que são exatamente "-" por vazio só na impressão.
         # (replace com valor escalar casa a célula inteira; não mexe em nomes de produto)
@@ -811,17 +861,19 @@ def iniciar_tela(setor: str):
                 if cods:
                     for loja_nome in LOJAS_NOMES:
                         n_loja = int(loja_nome.split()[-1])
-                        supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(date.today())).in_("codigo_produto", cods).execute()
+                        supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods).execute()
                         
                         lista_ins = []
                         for _, r in df_editado.iterrows():
                             q = converter_para_int_seguro(r[loja_nome])
                             if q > 0: 
-                                lista_ins.append({"data_pedido": str(date.today()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
+                                lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                         
                         if lista_ins: 
                             supabase.table("pedidos").insert(lista_ins).execute()
             st.success("Alterações consolidadas!")
+            # limpa o estado do editor para o guarda de "não salvo" desligar
+            st.session_state.pop("editor_separacao", None)
             st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -833,8 +885,7 @@ def iniciar_tela(setor: str):
 
         st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
-        resp_prod = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor).eq("ativo", True).execute()
-        df_prod = pd.DataFrame(resp_prod.data)
+        df_prod = carregar_produtos(setor, somente_ativos=True).copy()
 
         if df_prod.empty: 
             st.warning("Nenhum produto cadastrado para este setor.")
@@ -848,10 +899,9 @@ def iniciar_tela(setor: str):
         codigos_setor = df_prod['codigo'].tolist()
         df_perm = buscar_permissoes_setor(supabase, codigos_setor, num_loja)
         
-        resp_med = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
-        resp_exis = supabase.table("pedidos").select("codigo_produto, quantidade").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).execute()
+        df_med = carregar_medias(num_loja).copy()
+        resp_exis = supabase.table("pedidos").select("codigo_produto, quantidade").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
 
-        df_med = pd.DataFrame(resp_med.data)
         df_exis = pd.DataFrame(resp_exis.data)
 
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
@@ -918,6 +968,26 @@ def iniciar_tela(setor: str):
 
         grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=True, key=f"grid_loja_{num_loja}")
 
+        # ⚠️ ITEM 3 — alerta de pedido muito acima da média (10x). grid_editado já traz
+        # os valores digitados (mesmo antes de salvar), então o alerta atualiza na hora.
+        df_check = grid_editado.copy()
+        df_check["_q"] = df_check["Qtde Pedida"].apply(converter_para_int_seguro)
+        df_check["_m"] = pd.to_numeric(df_check["Média (90d)"], errors="coerce").fillna(0.0)
+        # só sinaliza quando há média (>0) — produto novo sem histórico não dá pra julgar
+        df_outliers = df_check[(df_check["_m"] > 0) & (df_check["_q"] > 10 * df_check["_m"])]
+        if not df_outliers.empty:
+            st.warning(f"⚠️ **{len(df_outliers)} item(ns) com pedido acima de 10x a média.** Confira se não há erro de digitação:")
+            st.dataframe(
+                df_outliers[["Cód. ERP", "Descrição", "Média (90d)", "Qtde Pedida"]].rename(columns={"Qtde Pedida": "Pedido"}),
+                hide_index=True, use_container_width=True,
+                column_config={"Média (90d)": st.column_config.NumberColumn(format="%.2f")},
+            )
+
+        # 🛡️ ITEM 2 — guarda contra perder a digitação (compara original x editado)
+        orig_q = df_filtrado["Qtde Pedida"].fillna("").astype(str).str.strip().tolist()
+        edit_q = grid_editado["Qtde Pedida"].fillna("").astype(str).str.strip().tolist()
+        guardar_contra_saida(orig_q != edit_q)
+
         df_print_loja = df_filtrado.drop(columns=['codigo'], errors='ignore').fillna('').rename(columns={'Qtde Pedida': 'Pedido'})
         html_table = df_print_loja.to_html(index=False, classes="print-table")
         st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}</div>', unsafe_allow_html=True)
@@ -935,17 +1005,19 @@ def iniciar_tela(setor: str):
             with st.spinner("Gravando pedido..."):
                 cods_tela = grid_editado["codigo"].tolist()
                 if cods_tela:
-                    supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).in_("codigo_produto", cods_tela).execute()
+                    supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods_tela).execute()
                     
                     lista_ins = []
                     for _, r in grid_editado.iterrows():
                         q = converter_para_int_seguro(r["Qtde Pedida"])
                         if q > 0: 
-                            lista_ins.append({"data_pedido": str(date.today()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
+                            lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                     
                     if lista_ins: 
                         supabase.table("pedidos").insert(lista_ins).execute()
             st.success("Gravado!")
+            # limpa o estado do editor para o guarda de "não salvo" desligar
+            st.session_state.pop(f"grid_loja_{num_loja}", None)
             st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -955,10 +1027,9 @@ def iniciar_tela(setor: str):
         st.markdown(f"<div class='no-print'><h2>🚚 Resumo Consolidado por Fornecedor — {setor}</h2></div>", unsafe_allow_html=True)
         st.markdown(f'<div class="print-only"><h3>🚚 Resumo por Fornecedor — {setor}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div></div>', unsafe_allow_html=True)
         
-        resp_prod = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
-        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
+        df_prod = carregar_produtos(setor).copy()
+        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
         
-        df_prod = pd.DataFrame(resp_prod.data)
         df_ped = pd.DataFrame(resp_ped.data)
 
         if df_prod.empty: 
@@ -1064,13 +1135,13 @@ def iniciar_tela(setor: str):
                     if cods:
                         for loja_nome in LOJAS_NOMES:
                             n_loja = int(loja_nome.split()[-1])
-                            supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(date.today())).in_("codigo_produto", cods).execute()
+                            supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods).execute()
                             
                             lista_ins = []
                             for _, r in df_forn_editado_full.iterrows():
                                 q = converter_para_int_seguro(r[loja_nome])
                                 if q > 0: 
-                                    lista_ins.append({"data_pedido": str(date.today()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
+                                    lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                             
                             if lista_ins: 
                                 supabase.table("pedidos").insert(lista_ins).execute()
@@ -1082,6 +1153,9 @@ def iniciar_tela(setor: str):
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Catálogo de Produtos":
         st.markdown(f"<div class='no-print'><h2>🗂️ Gestão de Catálogo e Permissões por Loja — {setor}</h2></div>", unsafe_allow_html=True)
+
+        # tela de edição → sempre dados frescos (evita editar em cima de permissão velha)
+        buscar_permissoes_setor.clear()
 
         resp_prod = supabase.table("produtos").select("*").eq("setor", setor).execute()
         df_prod = pd.DataFrame(resp_prod.data)
@@ -1230,7 +1304,7 @@ def iniciar_tela(setor: str):
                         for i in range(0, len(codigos_lista), 200): supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_lista[i:i+200]).execute()
                         for i in range(0, len(lista_perms_geral), 1000): supabase.table("produtos_lojas").insert(lista_perms_geral[i:i+1000]).execute()
 
-                    st.success("✅ Automação concluída!"); time.sleep(1.5); st.rerun()
+                    st.success("✅ Automação concluída!"); st.cache_data.clear(); time.sleep(1.5); st.rerun()
                 except Exception as e: st.error(f"⚠️ Erro processando: {e}")
 
         if btn_puxar_erp:
@@ -1248,7 +1322,7 @@ def iniciar_tela(setor: str):
                                 cod_oficial = int(row["cod"])
                                 desc_erp = str(row["descricao"])
                                 supabase.table("produtos").update({"descricao": desc_erp}).eq("codigo_erp", cod_oficial).execute()
-                            st.success("✅ Nomes atualizados em todos os fornecedores!"); time.sleep(1); st.rerun()
+                            st.success("✅ Nomes atualizados em todos os fornecedores!"); st.cache_data.clear(); time.sleep(1); st.rerun()
                         else: st.info("Nenhum nome encontrado.")
                 except Exception as e:
                     if "No database configured" in str(e) or "missing" in str(e).lower(): st.error("⚠️ Aviso: Credenciais do PostgreSQL não configuradas ou inacessíveis.")
