@@ -346,9 +346,22 @@ def iniciar_tela(setor: str):
 
         /* 🖨️ CSS DEFINITIVO PARA IMPRESSÃO STREAMLIT */
         @media print {
-            /* 1. Esconde a Sidebar, botões e barras de ferramentas */
-            header, [data-testid="stSidebar"], [data-testid="stToolbar"], button, .stButton {
+            /* 1. Esconde a Sidebar, botões e barras de ferramentas ABSOLUTAMENTE */
+            section[data-testid="stSidebar"], 
+            div[data-testid="stSidebar"], 
+            .stSidebar,
+            header, 
+            footer, 
+            [data-testid="stToolbar"], 
+            button, 
+            .stButton {
                 display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                width: 0 !important;
+                height: 0 !important;
+                position: absolute !important;
+                z-index: -9999 !important;
             }
             
             /* 2. Destrava TODAS as "caixas" do Streamlit que cortam a tela */
@@ -357,27 +370,33 @@ def iniciar_tela(setor: str):
             div[data-testid="stVerticalBlock"] {
                 height: auto !important;
                 min-height: 100% !important;
-                width: auto !important;
+                width: 100% !important;
                 max-width: 100% !important;
                 overflow: visible !important;
-                position: relative !important;
+                position: static !important;
                 display: block !important;
                 background-color: white !important;
                 margin: 0 !important;
                 padding: 0 !important;
             }
             
-            /* 3. Força todos os textos a ficarem pretos */
+            /* 3. Retira o recuo deixado pela Sidebar no conteúdo principal */
+            [data-testid="stMain"] {
+                margin-left: 0 !important;
+            }
+            
+            /* 4. Força todos os textos a ficarem pretos */
             * {
                 color: black !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
             
-            /* 4. Tira a limitação de altura da tabela e inverte a cor do Canvas */
+            /* 5. Ajuste fino nas tabelas e inversão da cor do Canvas */
             [data-testid="stDataEditor"], [data-testid="stDataFrame"] {
                 height: auto !important;
                 overflow: visible !important;
+                border: none !important;
             }
             canvas {
                 filter: invert(1) hue-rotate(180deg) brightness(1.1) !important;
