@@ -390,9 +390,9 @@ def gerar_excel_box(df: pd.DataFrame) -> bytes:
                 cel.number_format = FMT_REAL    # R$ ao digitar
         r += 1
 
-    larguras = {"A": 9, "B": 34, "C": 6, "D": 13, "E": 13, "F": 13, "G": 13,
-                "H": 13, "I": 13, "J": 13, "K": 3, "L": 13, "M": 13, "N": 13,
-                "O": 13, "P": 13, "Q": 8, "R": 12, "S": 22}
+    larguras = {"A": 9, "B": 34, "C": 8.5, "D": 8.5, "E": 8.5, "F": 8.5, "G": 8.5,
+                "H": 8.5, "I": 8.5, "J": 8.5, "K": 3, "L": 13, "M": 13, "N": 13,
+                "O": 13, "P": 13, "Q": 8.5, "R": 12, "S": 22}
     for L, w in larguras.items():
         ws.column_dimensions[L].width = w
     for L in ["K", "L", "M", "N", "O", "P"]:     # 6 spacers ocultos
@@ -969,7 +969,7 @@ def iniciar_tela(setor: str):
             # 📦 FLV Normal e FLV Ofertas usam o modelo "PEDIDO BOX"; demais setores seguem o padrão
             if str(setor).strip().lower() in ("flv normal", "flv ofertas"):
                 excel_bytes = gerar_excel_box(df_export)
-                nome_arq = f"Pedido_BOX_{setor}.xlsx"
+                nome_arq = "molicenter.xlsx"
             else:
                 excel_bytes = gerar_excel_download(df_export, f"Fechamento {setor}")
                 nome_arq = f"Separacao_Fechamento_{setor}.xlsx"
