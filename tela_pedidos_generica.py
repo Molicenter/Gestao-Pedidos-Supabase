@@ -273,6 +273,11 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
 def injetar_botao_impressao():
     st.components.v1.html(
         """
+        <style>
+        @media print {
+            button { display: none !important; }
+        }
+        </style>
         <button onclick="window.print()" style="
             width: 100%;
             background-color: #f0f2f6;
@@ -290,7 +295,7 @@ def injetar_botao_impressao():
             box-sizing: border-box;
             height: 38px;
         ">
-            🖨️ Imprimir
+            🖨️ Imprimir Tela
         </button>
         """,
         height=42,
@@ -349,6 +354,42 @@ def iniciar_tela(setor: str):
         [data-testid="stSidebar"] button[kind="primary"]:hover {
             background-color: #d33333 !important;
             border-color: #d33333 !important;
+        }
+
+        /* 🖨️ REGRAS EXCLUSIVAS PARA IMPRESSÃO DA TELA (CTRL+P) */
+        @media print {
+            /* 1. Esconder Sidebar, Top Header e Botões nativos do Streamlit */
+            [data-testid="stSidebar"], 
+            header[data-testid="stHeader"], 
+            button[kind="primary"],
+            button[kind="secondary"] {
+                display: none !important;
+            }
+
+            /* 2. Forçar a página a expandir e mostrar o conteúdo (tira o erro da página em branco) */
+            .stApp, .main, section[data-testid="stMain"] {
+                overflow: visible !important;
+                position: static !important;
+                background-color: white !important;
+            }
+            
+            .block-container {
+                overflow: visible !important;
+                max-width: 100% !important;
+                padding-top: 0 !important;
+                background-color: white !important;
+            }
+
+            /* 3. Forçar letras pretas no modo geral */
+            h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown {
+                color: black !important;
+            }
+
+            /* 4. Hack para o Data Editor (Canvas HTML5) não sair preto.
+               Isso inverte a cor de fundo (preto vira branco) automaticamente! */
+            canvas {
+                filter: invert(1) hue-rotate(180deg) brightness(1.2) !important;
+            }
         }
         </style>
     """, unsafe_allow_html=True)
