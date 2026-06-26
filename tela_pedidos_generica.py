@@ -10,6 +10,7 @@ from supabase import create_client, Client
 # ─────────────────────────────────────────────────────────────────────────────
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
+from openpyxl import Workbook
 
 LOJAS_NOMES = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
 
@@ -305,6 +306,120 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         worksheet.page_margins.footer = 0.5 / 2.54
 
     return output.getvalue()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 📦 EXCEL "PEDIDO BOX" (padrão Molicenter) — exclusivo p/ FLV Normal e FLV Ofertas
+# ─────────────────────────────────────────────────────────────────────────────
+def gerar_excel_box(df: pd.DataFrame) -> bytes:
+    """Layout 'PEDIDO BOX' replicando o molicenter_final.xlsx.
+    A CODIGO | B PRODUTOS MOLICENTER | C-J 291..298 | K-P spacer oculto |
+    Q TOTAL | R PREÇO | S OBS. Código > 9000 sai em branco na coluna A."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PEDIDO BOX"
+
+    # paleta exata do template
+    C_LARANJA = "C55A11"   # cabeçalho
+    C_VERDE   = "E2EFDA"   # lojas ímpares (banda verde)
+    C_BRANCO  = "FFFFFF"   # lojas pares
+    C_VERDE_T = "C6EFCE"   # coluna TOTAL
+    C_SALMAO  = "FCE4D6"   # coluna PREÇO
+    FMT_REAL  = '[$R$-416]\\ #,##0.00'
+
+    fonte = Font(name="Arial", size=9, bold=True)
+    fonte_h = Font(name="Arial", size=9, bold=True, color="FFFFFF")
+    borda = Border(*([Side(style="thin", color="000000")] * 4))
+    cc = Alignment(horizontal="center", vertical="center")
+    cl = Alignment(horizontal="left", vertical="center")
+
+    headers = ["CODIGO", "PRODUTOS MOLICENTER",
+               "291", "292", "293", "294", "295", "296", "297", "298",
+               "", "", "", "", "", "", "TOTAL", "PREÇO", "OBS:"]
+    for col, txt in enumerate(headers, 1):
+        cel = ws.cell(row=2, column=col, value=txt)
+        cel.fill = PatternFill("solid", fgColor=C_LARANJA)
+        cel.font = fonte_h
+        cel.border = borda
+        cel.alignment = cl if col == 2 else cc
+
+    # fill de fundo de cada coluna de DADO
+    fill_dados = {}
+    for i in range(8):                       # C..J = lojas
+        fill_dados[3 + i] = C_VERDE if i % 2 == 0 else C_BRANCO
+    fill_dados[17] = C_VERDE_T               # Q TOTAL
+    fill_dados[18] = C_SALMAO                # R PREÇO
+
+    def _cod_box(v):
+        try:
+            n = int(float(str(v).strip()))
+        except (ValueError, TypeError):
+            return None
+        return None if n > 9000 else n      # >9000 → célula vazia
+
+    def _qtd_box(v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        if s in ("", "-", "0", "0.0", "nan", "None", "<NA>"):
+            return None
+        try:
+            f = float(s.replace(",", "."))
+            return None if f == 0 else (int(f) if f.is_integer() else f)
+        except ValueError:
+            return None
+
+    # alfabético por produto (igual ao template)
+    df = df.copy()
+    if "Descrição" in df.columns:
+        df = df.sort_values(by="Descrição", key=lambda s: s.astype(str).str.lower())
+
+    r = 3
+    for _, row in df.iterrows():
+        ws.cell(row=r, column=1, value=_cod_box(row.get("Cód. ERP")))
+        ws.cell(row=r, column=2, value=str(row.get("Descrição", "")).strip())
+        for i, loja in enumerate(LOJAS_NOMES):
+            ws.cell(row=r, column=3 + i, value=_qtd_box(row.get(loja)))
+        ws.cell(row=r, column=17, value=f'=IF(SUM(C{r}:J{r})=0,"",SUM(C{r}:J{r}))')
+        for col in range(1, 20):
+            cel = ws.cell(row=r, column=col)
+            cel.font = fonte
+            cel.border = borda
+            cel.alignment = cl if col == 2 else cc
+            cel.fill = PatternFill("solid", fgColor=fill_dados.get(col, C_BRANCO))
+            if col == 18:
+                cel.number_format = FMT_REAL    # R$ ao digitar
+        r += 1
+
+    larguras = {"A": 9, "B": 34, "C": 6, "D": 13, "E": 13, "F": 13, "G": 13,
+                "H": 13, "I": 13, "J": 13, "K": 3, "L": 13, "M": 13, "N": 13,
+                "O": 13, "P": 13, "Q": 8, "R": 12, "S": 22}
+    for L, w in larguras.items():
+        ws.column_dimensions[L].width = w
+    for L in ["K", "L", "M", "N", "O", "P"]:     # 6 spacers ocultos
+        ws.column_dimensions[L].hidden = True
+
+    ws.row_dimensions[1].height = 6              # linha 1 reduzida
+    ws.row_dimensions[2].height = 18
+    for rr in range(3, r):
+        ws.row_dimensions[rr].height = 15
+
+    ws.auto_filter.ref = "A2:S2"
+    ws.freeze_panes = "A3"
+
+    # impressão RETRATO A4 (pedido do usuário)
+    ws.page_setup.orientation = "portrait"
+    ws.page_setup.paperSize = 9
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.75
+    ws.page_margins.right = 0.75
+    ws.page_margins.top = 1.0
+    ws.page_margins.bottom = 1.0
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🖨️ OUTROS UTILS DA INTERFACE
@@ -851,7 +966,14 @@ def iniciar_tela(setor: str):
             btn_salvar = st.button("💾 Salvar Ajustes Administrativos", type="primary", use_container_width=True)
         with c_excel:
             df_export = df_editado.drop(columns=['codigo'], errors='ignore')
-            st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Fechamento {setor}"), file_name=f"Separacao_Fechamento_{setor}.xlsx", use_container_width=True)
+            # 📦 FLV Normal e FLV Ofertas usam o modelo "PEDIDO BOX"; demais setores seguem o padrão
+            if str(setor).strip().lower() in ("flv normal", "flv ofertas"):
+                excel_bytes = gerar_excel_box(df_export)
+                nome_arq = f"Pedido_BOX_{setor}.xlsx"
+            else:
+                excel_bytes = gerar_excel_download(df_export, f"Fechamento {setor}")
+                nome_arq = f"Separacao_Fechamento_{setor}.xlsx"
+            st.download_button("📊 Exportar Excel", data=excel_bytes, file_name=nome_arq, use_container_width=True)
         with c_print: 
             injetar_botao_impressao()
             
