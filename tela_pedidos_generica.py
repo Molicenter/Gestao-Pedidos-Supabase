@@ -86,8 +86,8 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30], startrow=1)
         worksheet = writer.sheets[nome_aba[:30]]
 
-        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
-        fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+        fill_header = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        fill_green = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
         
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
@@ -150,11 +150,16 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         for col_num, column_title in enumerate(df_export.columns, 1):
             letra = get_column_letter(col_num)
             col_name = str(column_title).upper()
-            if "FORNECEDOR" in col_name: worksheet.column_dimensions[letra].width = 18
-            elif "DESCRI" in col_name or "PRODUTO" in col_name: worksheet.column_dimensions[letra].width = 45
-            elif "CÓDIGO" in col_name: worksheet.column_dimensions[letra].width = 12
-            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: worksheet.column_dimensions[letra].width = 12
-            else: worksheet.column_dimensions[letra].width = 9 
+            if "FORNECEDOR" in col_name: 
+                worksheet.column_dimensions[letra].width = 18
+            elif "DESCRI" in col_name or "PRODUTO" in col_name: 
+                worksheet.column_dimensions[letra].width = 45
+            elif "CÓDIGO" in col_name: 
+                worksheet.column_dimensions[letra].width = 12
+            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: 
+                worksheet.column_dimensions[letra].width = 12
+            else: 
+                worksheet.column_dimensions[letra].width = 9 
 
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
@@ -176,8 +181,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         worksheet = writer.book.create_sheet(nome_aba[:30])
         writer.book.active = worksheet
         
-        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
-        fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+        fill_header = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        fill_green = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
         font_normal = Font(bold=False)
@@ -203,7 +208,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
 
         worksheet.column_dimensions['A'].width = 12  
         worksheet.column_dimensions['B'].width = 45  
-        for col_idx in range(3, 12): worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
+        for col_idx in range(3, 12): 
+            worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
 
         hoje_str = date.today().strftime("%d/%m/%Y")
         worksheet["A1"] = "Tipo"
@@ -228,7 +234,9 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
             worksheet.cell(row=current_row, column=1).value = ""
             worksheet.cell(row=current_row, column=2).value = forn
             
-            for i, loja in enumerate(lojas_cols): worksheet.cell(row=current_row, column=3+i).value = loja
+            for i, loja in enumerate(lojas_cols): 
+                worksheet.cell(row=current_row, column=3+i).value = loja
+                
             worksheet.cell(row=current_row, column=11).value = "TOTAL"
             
             for col_idx in range(1, 12):
@@ -256,7 +264,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
                     c_loja.alignment = align_center
                     c_loja.border = border_thin
                     c_loja.font = font_bold
-                    if i % 2 == 0: c_loja.fill = fill_green
+                    if i % 2 == 0: 
+                        c_loja.fill = fill_green
                 
                 c_total = worksheet.cell(row=current_row, column=11)
                 c_total.value = f'=IF(SUM(C{current_row}:J{current_row})>0, SUM(C{current_row}:J{current_row}), "")'
@@ -266,7 +275,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
                 c_total.fill = fill_green
                 current_row += 1
                 
-        if 'Sheet' in writer.book.sheetnames: writer.book.remove(writer.book['Sheet'])
+        if 'Sheet' in writer.book.sheetnames: 
+            writer.book.remove(writer.book['Sheet'])
 
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
@@ -366,104 +376,101 @@ def iniciar_tela(setor: str):
             .print-only { display: none !important; } 
         }
         
-        /* 🔥 CSS FINAL OTIMIZADO (SEM GAMBIARRAS) 🔥 */
+        /* 🔥 CSS OTMIZADO PARA PREENCHIMENTO 100% NA IMPRESSÃO 🔥 */
         @media print {
             @page {
                 margin: 10mm;
             }
 
-            /* 1. MATA A SIDEBAR E MENU DE FORMA LIMPA (Ataca a tag principal independente da versão) */
-            [data-testid="stSidebar"], 
-            [data-testid="stSidebarNav"],
-            [data-testid="stSidebarContent"],
-            .sidebar {
-                display: none !important;
-                width: 0 !important;
-                margin: 0 !important;
-                padding: 0 !important;
-            }
-
-            /* 2. ZERA MARGENS DO CONTEÚDO PRINCIPAL (Mata o espaço em branco na esquerda e no topo) */
-            [data-testid="stMain"],
-            .main {
-                margin: 0 !important;
-                padding: 0 !important;
-                width: 100% !important;
-            }
-
-            .block-container, 
-            [data-testid="stMainBlockContainer"],
-            [data-testid="stAppViewContainer"] {
-                padding: 0 !important;
-                margin: 0 !important;
-                width: 100% !important;
-                max-width: 100% !important;
-            }
-            
-            /* Remove fundos falsos e espaçamentos internos ocultos */
-            div[data-testid="stVerticalBlockBorderWrapper"],
-            div[data-testid="stVerticalBlock"],
-            .element-container {
-                border: none !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                gap: 0 !important;
-            }
-
-            /* 3. ESCONDE TODOS OS BOTÕES E WIDGETS */
-            header, footer, [data-testid="stToolbar"],
+            /* Oculta tudo que não é o relatório e zera seu espaço */
+            section[data-testid="stSidebar"], 
+            div[data-testid="stSidebarNav"],
+            header[data-testid="stHeader"], 
+            footer, 
+            [data-testid="stToolbar"],
             button, .stButton, 
             [data-testid="stMetric"], 
             [data-testid="stRadio"], 
             [data-testid="stSelectbox"], 
             [data-testid="stTextInput"], 
             [data-testid="stAlert"],
-            [data-testid="stHorizontalBlock"],
+            [data-testid="stHorizontalBlock"], /* Esconde as colunas de filtros/botões de cima */
             h1, h2, h5, h6, 
             [data-testid="stDataEditor"], 
             [data-testid="stDataFrame"],
             .no-print {
                 display: none !important;
+                width: 0 !important;
+                height: 0 !important;
+                min-width: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
             }
             
-            /* 4. GARANTE FUNDO BRANCO NA PÁGINA TODA */
-            html, body, .stApp {
-                background-color: white !important;
+            /* Remove os preenchimentos/bordas invisíveis dos st.container */
+            [data-testid="stVerticalBlockBorderWrapper"] {
+                border: none !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            div[data-testid="stVerticalBlock"], .element-container {
+                gap: 0 !important;
+                margin-bottom: 0 !important;
+                padding-bottom: 0 !important;
             }
 
-            /* 5. MOSTRA APENAS A NOSSA TABELA, FLUIDA E NORMAL */
+            /* FORÇA O PREENCHIMENTO DO ESPAÇO DA ESQUERDA PARA 0 */
+            [data-testid="stMain"], .main {
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100vw !important;
+                max-width: 100vw !important;
+            }
+            
+            /* Zera margens gerais do body e containers filhos */
+            html, body, .stApp, [data-testid="stAppViewContainer"], .block-container {
+                background-color: white !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                max-width: 100% !important;
+                width: 100% !important;
+                overflow: visible !important;
+            }
+            
             .print-only {
                 display: block !important;
                 width: 100% !important;
             }
             
             .print-only h3 {
-                font-size: 13pt !important;
+                font-size: 12pt !important;
                 margin: 0 0 10px 0 !important;
-                padding-top: 0 !important;
                 color: black !important;
             }
             
+            /* Título do fornecedor grudado na tabela como um bloco contínuo */
             .print-only h4.supplier-header {
                 font-size: 9.5pt !important;
                 margin: 0 !important;
-                padding: 4px 6px !important;
+                padding: 6px 8px !important;
                 background-color: #e0e0e0 !important;
                 border: 1px solid black !important;
                 border-bottom: none !important;
                 color: black !important;
                 text-align: left !important;
-                page-break-after: avoid !important;
             }
             
-            /* Tabela Ajustada para evitar texto picotado */
+            /* Tabela ultra-comprimida */
             table.print-table {
                 width: 100% !important;
                 border-collapse: collapse;
                 font-family: Arial, sans-serif;
-                font-size: 8pt !important; /* Fonte ligeiramente menor */
+                font-size: 8.5pt !important;
                 margin-top: 0 !important;
-                margin-bottom: 20px !important; /* Espaço entre fornecedores */
+                margin-bottom: 20px !important; /* 🔥 Aumentado o espaço entre fornecedores para não sobrepor 🔥 */
                 page-break-inside: auto;
             }
             
@@ -474,11 +481,10 @@ def iniciar_tela(setor: str):
             
             table.print-table th, table.print-table td {
                 border: 1px solid black !important;
-                padding: 3px 4px !important; 
+                padding: 4px 6px !important; 
                 color: black !important;
                 line-height: 1.1 !important; 
                 text-align: center;
-                word-wrap: break-word !important; /* Permite quebrar se precisar */
             }
             
             table.print-table th {
@@ -938,7 +944,7 @@ def iniciar_tela(setor: str):
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
                 html_table = df_forn_view.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
-                st.markdown(f'<div class="print-only"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="print-only" style="page-break-inside: avoid;"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
                 
                 for l in LOJAS_NOMES:
                     if l not in edit_df.columns: 
