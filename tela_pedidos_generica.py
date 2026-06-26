@@ -266,7 +266,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
 def injetar_botao_impressao():
     st.components.v1.html(
         """
-        <button onclick="window.print()" style="
+        <button onclick="window.parent.print()" style="
             width: 100%;
             background-color: #f0f2f6;
             color: #31333f;
