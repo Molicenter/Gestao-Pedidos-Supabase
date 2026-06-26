@@ -438,7 +438,7 @@ def iniciar_tela(setor: str):
             /* Puxa agressivamente o conteúdo pro topo */
             [data-testid="stMain"] > div:first-child,
             [data-testid="stAppViewBlockContainer"] > div:first-child {
-                margin-top: -20px !important;
+                margin-top: -15px !important;
                 padding-top: 0 !important;
             }
             
