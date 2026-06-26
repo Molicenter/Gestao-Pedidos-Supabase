@@ -86,7 +86,7 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30], startrow=1)
         worksheet = writer.sheets[nome_aba[:30]]
 
-        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
+        fill_header = PatternFill(start_color="6FA8DC", end_color="6FA8DC", fill_type="solid")
         fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         
         font_header = Font(color="FFFFFF", bold=True)
