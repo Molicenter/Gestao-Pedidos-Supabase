@@ -5,6 +5,10 @@ import time
 from datetime import date
 from supabase import create_client, Client
 
+# NOVAS IMPORTAÇÕES PARA ESTILIZAR O EXCEL
+from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ⚙️ CONSTANTES E CONEXÕES GLOBAIS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -53,6 +57,117 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name=nome_aba[:30])
+        worksheet = writer.sheets[nome_aba[:30]]
+
+        # ──────────────────────────────────────────────────────────
+        # 🎨 DEFINIÇÃO DE ESTILOS (CORES E BORDAS)
+        # ──────────────────────────────────────────────────────────
+        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid") # Azul Escuro
+        fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid") # Verde Claro
+        
+        font_header = Font(color="FFFFFF", bold=True)
+        font_bold = Font(bold=True)
+        
+        border_thin = Border(left=Side(style='thin', color='000000'), 
+                             right=Side(style='thin', color='000000'),
+                             top=Side(style='thin', color='000000'), 
+                             bottom=Side(style='thin', color='000000'))
+        
+        align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        # ──────────────────────────────────────────────────────────
+        # 🔍 IDENTIFICAÇÃO DE COLUNAS
+        # ──────────────────────────────────────────────────────────
+        colunas_verdes = []
+        col_total_idx = None
+        cols_para_soma = []
+
+        for col_num, column_title in enumerate(df.columns, 1):
+            col_name = str(column_title).upper()
+            
+            # Pinta de verde as Lojas, Qtde, Total, Média e Estoque
+            if any(x in col_name for x in ["LOJA", "QTDE", "TOTAL", "MÉDIA", "ESTOQUE"]):
+                colunas_verdes.append(col_num)
+            
+            # Identifica as lojas para a fórmula de soma
+            if "LOJA" in col_name:
+                cols_para_soma.append(col_num)
+                
+            # Identifica onde está o Total
+            if "TOTAL" in col_name:
+                col_total_idx = col_num
+
+        # ──────────────────────────────────────────────────────────
+        # 🖌️ APLICANDO CABEÇALHO
+        # ──────────────────────────────────────────────────────────
+        for col_num, cell in enumerate(worksheet[1], 1):
+            cell.fill = fill_header
+            cell.font = font_header
+            cell.border = border_thin
+            cell.alignment = align_center
+
+        # ──────────────────────────────────────────────────────────
+        # 🖌️ APLICANDO LINHAS, CORES E NEGRITO
+        # ──────────────────────────────────────────────────────────
+        for row_num, row in enumerate(worksheet.iter_rows(min_row=2, max_row=worksheet.max_row, min_col=1, max_col=worksheet.max_column), 2):
+            for cell in row:
+                cell.border = border_thin
+                cell.font = font_bold
+                
+                # Alinha textos à esquerda, números ao centro
+                nome_col_atual = str(df.columns[cell.column - 1]).upper()
+                if any(x in nome_col_atual for x in ["FORNECEDOR", "DESCRIÇÃO", "PRODUTO"]):
+                    cell.alignment = align_left
+                else:
+                    cell.alignment = align_center
+                    
+                # Aplica o verde claro
+                if cell.column in colunas_verdes:
+                    cell.fill = fill_green
+
+        # ──────────────────────────────────────────────────────────
+        # 🧮 INJETANDO FÓRMULA EXCEL NA COLUNA DE TOTAL
+        # ──────────────────────────────────────────────────────────
+        if col_total_idx and cols_para_soma:
+            letra_total = get_column_letter(col_total_idx)
+            letra_primeira = get_column_letter(min(cols_para_soma))
+            letra_ultima = get_column_letter(max(cols_para_soma))
+            
+            for row_num in range(2, worksheet.max_row + 1):
+                # O Excel entende =SUM nativamente e traduz para =SOMA automaticamente no Brasil
+                # O SUM do Excel ignora traços ("-"), ou seja, soma apenas os números perfeitamente!
+                worksheet[f"{letra_total}{row_num}"].value = f"=SUM({letra_primeira}{row_num}:{letra_ultima}{row_num})"
+
+        # ──────────────────────────────────────────────────────────
+        # 📏 LARGURA DAS COLUNAS
+        # ──────────────────────────────────────────────────────────
+        for col_num, column_title in enumerate(df.columns, 1):
+            letra = get_column_letter(col_num)
+            col_name = str(column_title).upper()
+            
+            if "FORNECEDOR" in col_name:
+                worksheet.column_dimensions[letra].width = 18
+            elif "DESCRI" in col_name or "PRODUTO" in col_name:
+                worksheet.column_dimensions[letra].width = 45
+            elif "CÓD" in col_name:
+                worksheet.column_dimensions[letra].width = 12
+            elif "MÉDIA" in col_name or "ESTOQUE" in col_name:
+                worksheet.column_dimensions[letra].width = 12
+            else:
+                worksheet.column_dimensions[letra].width = 9 # Fica apertadinho padrão Excel para números
+
+        # ──────────────────────────────────────────────────────────
+        # 🖨️ CONFIGURAÇÃO DE IMPRESSÃO (A4, RETRATO, CABE TUDO)
+        # ──────────────────────────────────────────────────────────
+        worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
+        worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
+        
+        # Força o Excel a encolher as colunas para caber na largura de 1 página
+        worksheet.sheet_properties.pageSetUpPr.fitToPage = True
+        worksheet.page_setup.fitToWidth = 1
+        worksheet.page_setup.fitToHeight = 0 # 0 Libera para ter quantas páginas para baixo precisar
+
     return output.getvalue()
 
 def injetar_botao_impressao():
