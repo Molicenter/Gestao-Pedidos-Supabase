@@ -176,8 +176,11 @@ def iniciar_tela(setor: str):
                         if df_prod_map.empty:
                             st.warning("Nenhum produto cadastrado neste setor para atualizar as médias.")
                         else:
-                            if 'codigo_erp' not in df_prod_map.columns: df_prod_map['codigo_erp'] = df_prod_map['codigo']
-                            df_prod_map['codigo_erp'] = df_prod_map['codigo_erp'].fillna(df_prod_map['codigo']).astype(int)
+                            # ✅ CORREÇÃO 1: Renomeamos a PK para evitar conflito com a coluna do banco do ERP
+                            df_prod_map = df_prod_map.rename(columns={'codigo': 'codigo_pk_interna'})
+                            
+                            if 'codigo_erp' not in df_prod_map.columns: df_prod_map['codigo_erp'] = df_prod_map['codigo_pk_interna']
+                            df_prod_map['codigo_erp'] = df_prod_map['codigo_erp'].fillna(df_prod_map['codigo_pk_interna']).astype(int)
                             
                             # Consulta o ERP usando apenas os códigos ERP limpos
                             codigos_erp_setor = df_prod_map['codigo_erp'].unique().tolist()
@@ -191,10 +194,10 @@ def iniciar_tela(setor: str):
                                     st.info("A view retornou vazia para os produtos deste setor.")
                                 else:
                                     # Cruza o que voltou do ERP com nossos códigos internos
-                                    # Isso garante que se o ERP mandar média "10" para a cebolinha 9250, 
-                                    # tanto o Sidnei quanto o Anderson vão receber a média 10!
                                     df_merged = pd.merge(df_erp_setor, df_prod_map, left_on=c_cod_erp, right_on='codigo_erp', how='inner')
-                                    codigos_pks = df_merged['codigo'].unique().tolist()
+                                    
+                                    # ✅ CORREÇÃO 2: Agora puxamos nossa chave invisível pelo novo nome
+                                    codigos_pks = df_merged['codigo_pk_interna'].unique().tolist()
                                     
                                     for i in range(0, len(codigos_pks), 200):
                                         supabase.table("medias_90d").delete().in_("codigo_produto", codigos_pks[i:i+200]).execute()
@@ -203,7 +206,7 @@ def iniciar_tela(setor: str):
                                     for _, row in df_merged.iterrows():
                                         lista_insert.append({
                                             "loja": int(row[c_loja]),
-                                            "codigo_produto": int(row['codigo']), # Chave Primária Invisível
+                                            "codigo_produto": int(row['codigo_pk_interna']), # ✅ CORREÇÃO 3: Salvando com a PK correta
                                             "media_dia": float(row[c_med]) if pd.notna(row[c_med]) else 0.0
                                         })
                                     
