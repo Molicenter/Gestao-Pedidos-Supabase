@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import time
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from supabase import create_client, Client
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -15,6 +15,12 @@ LOJAS_NOMES = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06",
 
 def obter_supabase() -> Client:
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+
+def data_hora_brasilia() -> str:
+    # O servidor do Streamlit Cloud roda em UTC. Como Londrina/Brasília é UTC-3 fixo
+    # (sem horário de verão desde 2019), basta subtrair 3h — sem depender de tzdata.
+    agora = datetime.now(timezone.utc) - timedelta(hours=3)
+    return agora.strftime("%d/%m/%Y %H:%M")
 
 conn_pg = st.connection("banco_erp", type="sql")
 
@@ -462,6 +468,14 @@ def iniciar_tela(setor: str):
                 margin: 0 0 10px 0 !important;
                 color: black !important;
             }
+
+            /* Linha de data/hora (padrão brasileiro) impressa dentro do relatório */
+            .print-datetime {
+                font-size: 8.5pt !important;
+                color: #333 !important;
+                margin: -6px 0 8px 0 !important;
+                text-align: left !important;
+            }
             
             /* Título do fornecedor grudado na tabela como um bloco contínuo */
             .print-only h4.supplier-header {
@@ -550,13 +564,13 @@ def iniciar_tela(setor: str):
             .print-lojas table.print-table th:nth-child(2),
             .print-lojas table.print-table td:nth-child(2) { width: 13%; }  /* Fornecedor  */
             .print-lojas table.print-table th:nth-child(3),
-            .print-lojas table.print-table td:nth-child(3) { width: 52%; }  /* Descrição   */
+            .print-lojas table.print-table td:nth-child(3) { width: 51%; }  /* Descrição   */
             .print-lojas table.print-table th:nth-child(4),
             .print-lojas table.print-table td:nth-child(4) { width: 9%; }   /* Média (90d) */
             .print-lojas table.print-table th:nth-child(5),
             .print-lojas table.print-table td:nth-child(5) { width: 9%; }   /* Estoque ERP */
             .print-lojas table.print-table th:nth-child(6),
-            .print-lojas table.print-table td:nth-child(6) { width: 10%; }  /* Qtde Pedida */
+            .print-lojas table.print-table td:nth-child(6) { width: 11%; }  /* Pedido      */
             .print-lojas table.print-table td {
                 word-break: break-word;
                 overflow-wrap: anywhere;
@@ -780,7 +794,7 @@ def iniciar_tela(setor: str):
         # (replace com valor escalar casa a célula inteira; não mexe em nomes de produto)
         df_print_sep = df_exibicao.drop(columns=['codigo'], errors='ignore').fillna('').replace("-", "")
         html_table = df_print_sep.to_html(index=False, classes="print-table")
-        st.markdown(f'<div class="print-only"><h3>📊 Separação e Fechamento — {setor} ({filtro_selecionado})</h3>{html_table}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only"><h3>📊 Separação e Fechamento — {setor} ({filtro_selecionado})</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}</div>', unsafe_allow_html=True)
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
         with c_salvar: 
@@ -904,8 +918,9 @@ def iniciar_tela(setor: str):
 
         grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=True, key=f"grid_loja_{num_loja}")
 
-        html_table = df_filtrado.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
-        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3>{html_table}</div>', unsafe_allow_html=True)
+        df_print_loja = df_filtrado.drop(columns=['codigo'], errors='ignore').fillna('').rename(columns={'Qtde Pedida': 'Pedido'})
+        html_table = df_print_loja.to_html(index=False, classes="print-table")
+        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}</div>', unsafe_allow_html=True)
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
         with c_salvar: 
@@ -938,6 +953,7 @@ def iniciar_tela(setor: str):
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Visão Fornecedores (Resumo)":
         st.markdown(f"<div class='no-print'><h2>🚚 Resumo Consolidado por Fornecedor — {setor}</h2></div>", unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only"><div class="print-datetime">Resumo por Fornecedor — {setor} &nbsp;|&nbsp; Emitido em {data_hora_brasilia()}</div></div>', unsafe_allow_html=True)
         
         resp_prod = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
@@ -1119,7 +1135,7 @@ def iniciar_tela(setor: str):
         edited_cat = st.data_editor(df_cat_completo[cols_exibicao], use_container_width=True, hide_index=True, column_config=col_cfg_c, num_rows="dynamic", key="catalogo_editor")
 
         html_table = df_cat_completo[cols_exibicao].drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
-        st.markdown(f'<div class="print-only"><h3>🗂️ Catálogo Geral — {setor}</h3>{html_table}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only"><h3>🗂️ Catálogo Geral — {setor}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}</div>', unsafe_allow_html=True)
 
         st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
         col_btn_salvar, col_btn_erp = st.columns(2)
