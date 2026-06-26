@@ -34,7 +34,9 @@ def converter_para_int_seguro(valor) -> int:
         return 0
 
 def buscar_estoque_erp(loja_nome, codigos_erp, setor):
-    if not codigos_erp: return pd.DataFrame(columns=["Código", "Estoque"])
+    if not codigos_erp: 
+        return pd.DataFrame(columns=["Código", "Estoque"])
+        
     loja_id = int(loja_nome.split()[-1])
     loja_id_str = f"{loja_id:03d}" 
     cods_str = ", ".join(map(str, set(codigos_erp)))
@@ -118,11 +120,15 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
                 col_total_idx = col_num
 
         for col_num, cell in enumerate(worksheet[2], 1):
-            cell.fill = fill_header; cell.font = font_header; cell.border = border_thin; cell.alignment = align_center
+            cell.fill = fill_header
+            cell.font = font_header
+            cell.border = border_thin
+            cell.alignment = align_center
 
         for row_num, row in enumerate(worksheet.iter_rows(min_row=3, max_row=worksheet.max_row, min_col=1, max_col=worksheet.max_column), 3):
             for cell in row:
-                cell.border = border_thin; cell.font = font_bold
+                cell.border = border_thin
+                cell.font = font_bold
                 nome_col_atual = str(df_export.columns[cell.column - 1]).upper()
                 if any(x in nome_col_atual for x in ["FORNECEDOR", "DESCRIÇÃO", "PRODUTO"]):
                     cell.alignment = align_left
@@ -141,19 +147,28 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         for col_num, column_title in enumerate(df_export.columns, 1):
             letra = get_column_letter(col_num)
             col_name = str(column_title).upper()
-            if "FORNECEDOR" in col_name: worksheet.column_dimensions[letra].width = 18
-            elif "DESCRI" in col_name or "PRODUTO" in col_name: worksheet.column_dimensions[letra].width = 45
-            elif "CÓDIGO" in col_name: worksheet.column_dimensions[letra].width = 12
-            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: worksheet.column_dimensions[letra].width = 12
-            else: worksheet.column_dimensions[letra].width = 9 
+            if "FORNECEDOR" in col_name: 
+                worksheet.column_dimensions[letra].width = 18
+            elif "DESCRI" in col_name or "PRODUTO" in col_name: 
+                worksheet.column_dimensions[letra].width = 45
+            elif "CÓDIGO" in col_name: 
+                worksheet.column_dimensions[letra].width = 12
+            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: 
+                worksheet.column_dimensions[letra].width = 12
+            else: 
+                worksheet.column_dimensions[letra].width = 9 
 
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
         worksheet.sheet_properties.pageSetUpPr.fitToPage = True
-        worksheet.page_setup.fitToWidth = 1; worksheet.page_setup.fitToHeight = 0 
-        worksheet.page_margins.left = 1 / 2.54; worksheet.page_margins.right = 1 / 2.54
-        worksheet.page_margins.top = 1 / 2.54; worksheet.page_margins.bottom = 1 / 2.54
-        worksheet.page_margins.header = 0.5 / 2.54; worksheet.page_margins.footer = 0.5 / 2.54
+        worksheet.page_setup.fitToWidth = 1
+        worksheet.page_setup.fitToHeight = 0 
+        worksheet.page_margins.left = 1 / 2.54
+        worksheet.page_margins.right = 1 / 2.54
+        worksheet.page_margins.top = 1 / 2.54
+        worksheet.page_margins.bottom = 1 / 2.54
+        worksheet.page_margins.header = 0.5 / 2.54
+        worksheet.page_margins.footer = 0.5 / 2.54
 
     return output.getvalue()
 
@@ -186,7 +201,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
 
         worksheet.column_dimensions['A'].width = 12  
         worksheet.column_dimensions['B'].width = 45  
-        for col_idx in range(3, 12): worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
+        for col_idx in range(3, 12): 
+            worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
 
         hoje_str = date.today().strftime("%d/%m/%Y")
         worksheet["A1"] = "Tipo"
@@ -196,7 +212,10 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         
         for col_idx in range(1, 12):
             cell = worksheet.cell(row=1, column=col_idx)
-            cell.fill = fill_header; cell.font = font_header; cell.border = border_thin; cell.alignment = align_center
+            cell.fill = fill_header
+            cell.font = font_header
+            cell.border = border_thin
+            cell.alignment = align_center
 
         current_row = 2
         lojas_cols = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
@@ -207,42 +226,62 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
             
             worksheet.cell(row=current_row, column=1).value = ""
             worksheet.cell(row=current_row, column=2).value = forn
-            for i, loja in enumerate(lojas_cols): worksheet.cell(row=current_row, column=3+i).value = loja
+            
+            for i, loja in enumerate(lojas_cols): 
+                worksheet.cell(row=current_row, column=3+i).value = loja
+                
             worksheet.cell(row=current_row, column=11).value = "TOTAL"
             
             for col_idx in range(1, 12):
                 cell = worksheet.cell(row=current_row, column=col_idx)
-                cell.fill = fill_header; cell.font = font_header; cell.border = border_thin; cell.alignment = align_center
+                cell.fill = fill_header
+                cell.font = font_header
+                cell.border = border_thin
+                cell.alignment = align_center
             
             current_row += 1
             
             for _, r in df_f.iterrows():
                 c1 = worksheet.cell(row=current_row, column=1, value=limpar(r.get("Cód. ERP", "")))
-                c1.alignment = align_center; c1.border = border_thin; c1.font = font_normal
+                c1.alignment = align_center
+                c1.border = border_thin
+                c1.font = font_normal
                 
                 c2 = worksheet.cell(row=current_row, column=2, value=limpar(r.get("Produto", "")))
-                c2.alignment = align_left; c2.border = border_thin; c2.font = font_normal
+                c2.alignment = align_left
+                c2.border = border_thin
+                c2.font = font_normal
                 
                 for i, loja in enumerate(lojas_cols):
                     c_loja = worksheet.cell(row=current_row, column=3+i, value=limpar(r.get(loja, "")))
-                    c_loja.alignment = align_center; c_loja.border = border_thin; c_loja.font = font_bold
-                    if i % 2 == 0: c_loja.fill = fill_green
+                    c_loja.alignment = align_center
+                    c_loja.border = border_thin
+                    c_loja.font = font_bold
+                    if i % 2 == 0: 
+                        c_loja.fill = fill_green
                 
                 c_total = worksheet.cell(row=current_row, column=11)
                 c_total.value = f'=IF(SUM(C{current_row}:J{current_row})>0, SUM(C{current_row}:J{current_row}), "")'
-                c_total.alignment = align_center; c_total.border = border_thin; c_total.font = font_bold
+                c_total.alignment = align_center
+                c_total.border = border_thin
+                c_total.font = font_bold
                 c_total.fill = fill_green
                 current_row += 1
                 
-        if 'Sheet' in writer.book.sheetnames: writer.book.remove(writer.book['Sheet'])
+        if 'Sheet' in writer.book.sheetnames: 
+            writer.book.remove(writer.book['Sheet'])
 
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
         worksheet.sheet_properties.pageSetUpPr.fitToPage = True
-        worksheet.page_setup.fitToWidth = 1; worksheet.page_setup.fitToHeight = 0 
-        worksheet.page_margins.left = 1 / 2.54; worksheet.page_margins.right = 1 / 2.54
-        worksheet.page_margins.top = 1 / 2.54; worksheet.page_margins.bottom = 1 / 2.54
-        worksheet.page_margins.header = 0.5 / 2.54; worksheet.page_margins.footer = 0.5 / 2.54
+        worksheet.page_setup.fitToWidth = 1
+        worksheet.page_setup.fitToHeight = 0 
+        worksheet.page_margins.left = 1 / 2.54
+        worksheet.page_margins.right = 1 / 2.54
+        worksheet.page_margins.top = 1 / 2.54
+        worksheet.page_margins.bottom = 1 / 2.54
+        worksheet.page_margins.header = 0.5 / 2.54
+        worksheet.page_margins.footer = 0.5 / 2.54
 
     return output.getvalue()
 
@@ -276,11 +315,12 @@ def injetar_botao_impressao():
     )
 
 def exibir_status_digitacao_lojas(df_pedidos_hoje):
-    st.markdown("##### 🏪 Status de Digitação das Lojas (Hoje)")
+    st.markdown("<div class='no-print'>##### 🏪 Status de Digitação das Lojas (Hoje)</div>", unsafe_allow_html=True)
     lojas_que_digitam = set()
     if not df_pedidos_hoje.empty:
         lojas_codigos = df_pedidos_hoje["loja"].unique()
-        for c in lojas_codigos: lojas_que_digitam.add(f"Loja {c:02d}")
+        for c in lojas_codigos: 
+            lojas_que_digitam.add(f"Loja {c:02d}")
     
     cols = st.columns(8)
     for i, loja_nome in enumerate(LOJAS_NOMES):
@@ -292,14 +332,17 @@ def exibir_status_digitacao_lojas(df_pedidos_hoje):
     st.markdown("<br>", unsafe_allow_html=True)
 
 def buscar_permissoes_setor(supabase_client, codigos_setor, num_loja=None):
-    if not codigos_setor: return pd.DataFrame()
+    if not codigos_setor: 
+        return pd.DataFrame()
     dfs = []
     for i in range(0, len(codigos_setor), 200):
         lote = codigos_setor[i:i+200]
         query = supabase_client.table("produtos_lojas").select("codigo_produto, loja, disponivel").in_("codigo_produto", lote)
-        if num_loja is not None: query = query.eq("loja", num_loja)
+        if num_loja is not None: 
+            query = query.eq("loja", num_loja)
         resp = query.execute()
-        if resp.data: dfs.append(pd.DataFrame(resp.data))
+        if resp.data: 
+            dfs.append(pd.DataFrame(resp.data))
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -317,26 +360,47 @@ def iniciar_tela(setor: str):
         
         [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"],
         [data-testid="stSidebar"] button[kind="primary"] {
-            background-color: #ff4b4b !important; color: white !important; border-color: #ff4b4b !important;
+            background-color: #ff4b4b !important; 
+            color: white !important; 
+            border-color: #ff4b4b !important;
         }
         
         /* 🔥 A MÁGICA DA IMPRESSÃO ACONTECE AQUI 🔥 */
         @media screen {
-            .print-only { display: none !important; } /* Invisível na tela */
+            .print-only { display: none !important; } /* Invisível na tela do computador */
         }
         
         @media print {
-            /* 1. Remove toda a poluição visual do Streamlit */
-            [data-testid="stSidebar"], header, footer, [data-testid="stToolbar"], button, .stButton {
+            /* 1. MATA A NAVEGAÇÃO E BARRAS DE FERRAMENTAS ABSOLUTAMENTE */
+            section[data-testid="stSidebar"], 
+            header[data-testid="stHeader"], 
+            footer, 
+            [data-testid="stToolbar"] {
+                display: none !important;
+                width: 0 !important;
+                height: 0 !important;
+            }
+            
+            /* 2. REMOVE OS "EXTRAS" DO STREAMLIT (Filtros, Botões soltos, Alertas e Colunas de Status) */
+            button, .stButton, 
+            [data-testid="stMetric"], 
+            [data-testid="stRadio"], 
+            [data-testid="stSelectbox"], 
+            [data-testid="stTextInput"], 
+            [data-testid="stAlert"],
+            [data-testid="column"] {
                 display: none !important;
             }
             
-            /* 2. Oculta a tabela interativa (Canvas HTML5) que não gera bordas na impressão */
-            [data-testid="stDataEditor"], [data-testid="stDataFrame"], [data-testid="stMetric"] {
+            /* 3. OCULTA OS TÍTULOS ORIGINAIS E A TABELA INTERATIVA (CANVAS) */
+            h1, h2, h5, h6, 
+            [data-testid="stDataEditor"], 
+            [data-testid="stDataFrame"],
+            .no-print {
                 display: none !important;
             }
             
-            /* 3. Limpa todas as margens do sistema para caber no A4 */
+            /* 4. ZERA TODAS AS MARGENS PARA A TABELA ESTICAR NA FOLHA A4 */
             html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], .block-container {
                 background-color: white !important;
                 margin: 0 !important;
@@ -346,8 +410,16 @@ def iniciar_tela(setor: str):
                 overflow: visible !important;
             }
             
-            /* 4. Revela a tabela HTML nativa idêntica ao app antigo */
+            /* 5. REVELA E ESTILIZA A NOSSA TABELA HTML NATIVA */
             .print-only {
+                display: block !important;
+            }
+            
+            .print-only h3, .print-only h4 {
+                color: black !important;
+                margin-top: 0px !important;
+                margin-bottom: 10px !important;
+                font-size: 18px !important;
                 display: block !important;
             }
             
@@ -375,7 +447,7 @@ def iniciar_tela(setor: str):
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
-            /* Alinhamento da descrição do produto (sempre as colunas 2, 3 ou 4 dependendo da visão) */
+            /* Alinhamento da descrição do produto à esquerda */
             table.print-table td:nth-child(2), table.print-table td:nth-child(3), table.print-table td:nth-child(4) {
                 text-align: left;
             }
@@ -401,8 +473,11 @@ def iniciar_tela(setor: str):
             st.markdown("🔄 **Atualizar Médias (90d)**")
             
             dict_views = {
-                "Média Semanal": "python_90dSEMANA", "Diária": "python_90dDIARIA",
-                "Seg-Ter": "python_90dSEGTER", "Qua-Qui": "python_90dQUAQUI", "Sex-Sab-Dom": "python_90dSEXSABDOM"
+                "Média Semanal": "python_90dSEMANA", 
+                "Diária": "python_90dDIARIA",
+                "Seg-Ter": "python_90dSEGTER", 
+                "Qua-Qui": "python_90dQUAQUI", 
+                "Sex-Sab-Dom": "python_90dSEXSABDOM"
             }
             view_escolhida = st.selectbox("Selecione o período base:", list(dict_views.keys()), label_visibility="collapsed")
             
@@ -412,10 +487,13 @@ def iniciar_tela(setor: str):
                     try:
                         resp_prod = supabase.table("produtos").select("codigo, codigo_erp").eq("setor", setor).execute()
                         df_prod_map = pd.DataFrame(resp_prod.data)
-                        if df_prod_map.empty: st.warning("Nenhum produto cadastrado neste setor.")
+                        
+                        if df_prod_map.empty: 
+                            st.warning("Nenhum produto cadastrado neste setor.")
                         else:
                             df_prod_map = df_prod_map.rename(columns={'codigo': 'codigo_pk_interna'})
-                            if 'codigo_erp' not in df_prod_map.columns: df_prod_map['codigo_erp'] = df_prod_map['codigo_pk_interna']
+                            if 'codigo_erp' not in df_prod_map.columns: 
+                                df_prod_map['codigo_erp'] = df_prod_map['codigo_pk_interna']
                             df_prod_map['codigo_erp'] = df_prod_map['codigo_erp'].fillna(df_prod_map['codigo_pk_interna']).astype(int)
                             
                             codigos_erp_setor = df_prod_map['codigo_erp'].unique().tolist()
@@ -424,46 +502,76 @@ def iniciar_tela(setor: str):
                             if not df_erp.empty:
                                 c_loja, c_cod_erp, c_med = df_erp.columns[0], df_erp.columns[1], df_erp.columns[2]
                                 df_erp_setor = df_erp[df_erp[c_cod_erp].isin(codigos_erp_setor)]
-                                if df_erp_setor.empty: st.info("View vazia para estes produtos.")
+                                
+                                if df_erp_setor.empty: 
+                                    st.info("View vazia para estes produtos.")
                                 else:
                                     df_merged = pd.merge(df_erp_setor, df_prod_map, left_on=c_cod_erp, right_on='codigo_erp', how='inner')
                                     codigos_pks = df_merged['codigo_pk_interna'].unique().tolist()
-                                    for i in range(0, len(codigos_pks), 200): supabase.table("medias_90d").delete().in_("codigo_produto", codigos_pks[i:i+200]).execute()
                                     
-                                    lista_insert = [{"loja": int(row[c_loja]), "codigo_produto": int(row['codigo_pk_interna']), "media_dia": float(row[c_med]) if pd.notna(row[c_med]) else 0.0} for _, row in df_merged.iterrows()]
-                                    for i in range(0, len(lista_insert), 1000): supabase.table("medias_90d").insert(lista_insert[i:i+1000]).execute()
-                                    st.success(f"Médias ({view_escolhida}) sincronizadas!"); time.sleep(1.5); st.rerun()
-                            else: st.warning("View do ERP retornou vazia.")
-                    except Exception as e: st.error(f"Erro na sincronização: {e}")
+                                    for i in range(0, len(codigos_pks), 200): 
+                                        supabase.table("medias_90d").delete().in_("codigo_produto", codigos_pks[i:i+200]).execute()
+                                    
+                                    lista_insert = []
+                                    for _, row in df_merged.iterrows():
+                                        lista_insert.append({
+                                            "loja": int(row[c_loja]), 
+                                            "codigo_produto": int(row['codigo_pk_interna']), 
+                                            "media_dia": float(row[c_med]) if pd.notna(row[c_med]) else 0.0
+                                        })
+                                        
+                                    for i in range(0, len(lista_insert), 1000): 
+                                        supabase.table("medias_90d").insert(lista_insert[i:i+1000]).execute()
+                                        
+                                    st.success(f"Médias ({view_escolhida}) sincronizadas!")
+                                    time.sleep(1.5)
+                                    st.rerun()
+                            else: 
+                                st.warning("View do ERP retornou vazia.")
+                    except Exception as e: 
+                        st.error(f"Erro na sincronização: {e}")
 
             st.markdown("---")
-            if 'confirmar_limpeza' not in st.session_state: st.session_state['confirmar_limpeza'] = False
+            if 'confirmar_limpeza' not in st.session_state: 
+                st.session_state['confirmar_limpeza'] = False
+                
             if not st.session_state['confirmar_limpeza']:
-                if st.button("🗑️ Limpar Pedidos", type="primary", use_container_width=True): st.session_state['confirmar_limpeza'] = True; st.rerun()
+                if st.button("🗑️ Limpar Pedidos", type="primary", use_container_width=True): 
+                    st.session_state['confirmar_limpeza'] = True
+                    st.rerun()
             else:
                 st.warning("⚠️ **Confirma exclusão?**")
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("✔️ Sim", type="primary", use_container_width=True):
-                        with st.spinner("Limpando..."): supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(date.today())).execute()
-                        st.session_state['confirmar_limpeza'] = False; st.rerun()
+                        with st.spinner("Limpando..."): 
+                            supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(date.today())).execute()
+                        st.session_state['confirmar_limpeza'] = False
+                        st.rerun()
                 with c2:
-                    if st.button("❌ Não", use_container_width=True): st.session_state['confirmar_limpeza'] = False; st.rerun()
+                    if st.button("❌ Não", use_container_width=True): 
+                        st.session_state['confirmar_limpeza'] = False
+                        st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 1 — SEPARAÇÃO E FECHAMENTO
     # ─────────────────────────────────────────────────────────────────────────
     if perfil_navegacao == "Separação e Fechamento":
-        st.markdown(f"## 📊 Separação e Fechamento — {setor}")
+        st.markdown(f"<div class='no-print'><h2>📊 Separação e Fechamento — {setor}</h2></div>", unsafe_allow_html=True)
         
         resp_prod = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
+        
         df_prod = pd.DataFrame(resp_prod.data)
         df_ped = pd.DataFrame(resp_ped.data)
         
-        if df_prod.empty: st.warning("Nenhum produto cadastrado para este setor."); return
+        if df_prod.empty: 
+            st.warning("Nenhum produto cadastrado para este setor.")
+            return
             
-        if 'codigo_erp' not in df_prod.columns: df_prod['codigo_erp'] = df_prod['codigo']
+        if 'codigo_erp' not in df_prod.columns: 
+            df_prod['codigo_erp'] = df_prod['codigo']
+            
         df_prod['codigo_erp'] = df_prod['codigo_erp'].fillna(df_prod['codigo']).astype(int)
 
         codigos_setor = df_prod['codigo'].tolist()
@@ -475,28 +583,33 @@ def iniciar_tela(setor: str):
         if not df_ped.empty:
             df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
             for n in range(1, 9):
-                if n in df_pivot.columns: df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
-        else: df_pivot = pd.DataFrame(columns=['codigo_produto'])
+                if n in df_pivot.columns: 
+                    df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
+        else: 
+            df_pivot = pd.DataFrame(columns=['codigo_produto'])
 
         df_consolidado = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left')
         
         if not df_perm_all.empty:
             df_perm_all['loja_nome'] = df_perm_all['loja'].apply(lambda x: f"Loja {int(x):02d}_perm")
             df_perm_pivot = df_perm_all.pivot_table(index='codigo_produto', columns='loja_nome', values='disponivel', aggfunc='last').reset_index()
-        else: df_perm_pivot = pd.DataFrame(columns=['codigo_produto'])
+        else: 
+            df_perm_pivot = pd.DataFrame(columns=['codigo_produto'])
 
         df_consolidado = pd.merge(df_consolidado, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left')
         
         perm_cols = [f"Loja {n:02d}_perm" for n in range(1, 9)]
         for col in perm_cols:
-            if col not in df_consolidado.columns: df_consolidado[col] = True
+            if col not in df_consolidado.columns: 
+                df_consolidado[col] = True
                 
         df_consolidado[perm_cols] = df_consolidado[perm_cols].fillna(True)
         mask_active = df_consolidado[perm_cols].any(axis=1)
         df_consolidado = df_consolidado[mask_active]
 
         for loja in LOJAS_NOMES:
-            if loja not in df_consolidado.columns: df_consolidado[loja] = 0.0
+            if loja not in df_consolidado.columns: 
+                df_consolidado[loja] = 0.0
             df_consolidado[loja] = df_consolidado[loja].fillna(0).astype(int)
 
         df_consolidado["TOTAL_NUM"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
@@ -507,7 +620,8 @@ def iniciar_tela(setor: str):
             opcoes_forn = ["Todos"] + sorted([str(f) for f in df_consolidado['fornecedor'].unique() if pd.notna(f) and str(f).strip() != ""])
             filtro_selecionado = st.radio("🔍 Filtrar Exibição por Setor:", options=opcoes_forn, horizontal=True)
 
-        if filtro_selecionado != "Todos": df_consolidado = df_consolidado[df_consolidado['fornecedor'] == filtro_selecionado]
+        if filtro_selecionado != "Todos": 
+            df_consolidado = df_consolidado[df_consolidado['fornecedor'] == filtro_selecionado]
 
         st.metric(label="📦 Itens c/ pedido", value=f"{df_consolidado[df_consolidado['TOTAL_NUM'] > 0].shape[0]} produtos")
 
@@ -515,7 +629,8 @@ def iniciar_tela(setor: str):
         for loja in LOJAS_NOMES:
             df_consolidado[loja] = df_consolidado[loja].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
             perm_col = f"{loja}_perm"
-            if perm_col in df_consolidado.columns: df_consolidado.loc[df_consolidado[perm_col] != True, loja] = "-"
+            if perm_col in df_consolidado.columns: 
+                df_consolidado.loc[df_consolidado[perm_col] != True, loja] = "-"
 
         df_consolidado = df_consolidado.rename(columns={'codigo_erp': 'Cód. ERP', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
         df_exibicao = df_consolidado[["Fornecedor", "codigo", "Cód. ERP", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by=['Fornecedor', 'Descrição'])
@@ -527,20 +642,23 @@ def iniciar_tela(setor: str):
             "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
             "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
         }
-        for loja in LOJAS_NOMES: col_cfg[loja] = st.column_config.TextColumn(loja, width=75, disabled=False)
+        for loja in LOJAS_NOMES: 
+            col_cfg[loja] = st.column_config.TextColumn(loja, width=75, disabled=False)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
         # 🔥 INJEÇÃO DA TABELA HTML INVISÍVEL PARA IMPRESSÃO PERFEITA 🔥
         html_table = df_exibicao.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
-        st.markdown(f'<div class="print-only"><h3>📊 Fechamento — {setor} ({filtro_selecionado})</h3>{html_table}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only"><h3>📊 Separação e Fechamento — {setor} ({filtro_selecionado})</h3>{html_table}</div>', unsafe_allow_html=True)
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
-        with c_salvar: btn_salvar = st.button("💾 Salvar Ajustes Administrativos", type="primary", use_container_width=True)
+        with c_salvar: 
+            btn_salvar = st.button("💾 Salvar Ajustes Administrativos", type="primary", use_container_width=True)
         with c_excel:
             df_export = df_editado.drop(columns=['codigo'], errors='ignore')
             st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Fechamento {setor}"), file_name=f"Separacao_Fechamento_{setor}.xlsx", use_container_width=True)
-        with c_print: injetar_botao_impressao()
+        with c_print: 
+            injetar_botao_impressao()
             
         if btn_salvar:
             with st.spinner("Atualizando registros..."):
@@ -549,12 +667,17 @@ def iniciar_tela(setor: str):
                     for loja_nome in LOJAS_NOMES:
                         n_loja = int(loja_nome.split()[-1])
                         supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(date.today())).in_("codigo_produto", cods).execute()
+                        
                         lista_ins = []
                         for _, r in df_editado.iterrows():
                             q = converter_para_int_seguro(r[loja_nome])
-                            if q > 0: lista_ins.append({"data_pedido": str(date.today()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
-                        if lista_ins: supabase.table("pedidos").insert(lista_ins).execute()
-            st.success("Alterações consolidadas!"); st.rerun()
+                            if q > 0: 
+                                lista_ins.append({"data_pedido": str(date.today()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
+                        
+                        if lista_ins: 
+                            supabase.table("pedidos").insert(lista_ins).execute()
+            st.success("Alterações consolidadas!")
+            st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 2 — VISÃO DAS LOJAS
@@ -563,14 +686,18 @@ def iniciar_tela(setor: str):
         loja_selecionada = st.selectbox("👁️ Visualizar como:", LOJAS_NOMES) if acesso_total else usuario_atual
         num_loja = int(loja_selecionada.split()[-1])
 
-        st.markdown(f"## 🥬 Lançamento de Pedidos — {loja_selecionada}")
+        st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
         resp_prod = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor).eq("ativo", True).execute()
         df_prod = pd.DataFrame(resp_prod.data)
 
-        if df_prod.empty: st.warning("Nenhum produto cadastrado para este setor."); return
+        if df_prod.empty: 
+            st.warning("Nenhum produto cadastrado para este setor.")
+            return
 
-        if 'codigo_erp' not in df_prod.columns: df_prod['codigo_erp'] = df_prod['codigo']
+        if 'codigo_erp' not in df_prod.columns: 
+            df_prod['codigo_erp'] = df_prod['codigo']
+            
         df_prod['codigo_erp'] = df_prod['codigo_erp'].fillna(df_prod['codigo']).astype(int)
 
         codigos_setor = df_prod['codigo'].tolist()
@@ -585,12 +712,16 @@ def iniciar_tela(setor: str):
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
         df_loja = pd.merge(df_prod, df_perm, left_on='codigo', right_on='codigo_produto', how='left')
-        if 'disponivel' not in df_loja.columns: df_loja['disponivel'] = True
-        else: df_loja['disponivel'] = df_loja['disponivel'].fillna(True)
+        if 'disponivel' not in df_loja.columns: 
+            df_loja['disponivel'] = True
+        else: 
+            df_loja['disponivel'] = df_loja['disponivel'].fillna(True)
             
         df_loja = df_loja[df_loja['disponivel'] == True]
 
-        if df_loja.empty: st.warning("Nenhum produto liberado para esta loja neste setor."); return
+        if df_loja.empty: 
+            st.warning("Nenhum produto liberado para esta loja neste setor.")
+            return
 
         df_loja = pd.merge(df_loja, df_med, on='codigo_produto', how='left')
         df_loja['media_dia'] = df_loja['media_dia'].fillna(0.0)
@@ -647,29 +778,36 @@ def iniciar_tela(setor: str):
         st.markdown(f'<div class="print-only"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3>{html_table}</div>', unsafe_allow_html=True)
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
-        with c_salvar: btn_salvar_loja = st.button("💾 Salvar Pedido Oficial", type="primary", use_container_width=True)
+        with c_salvar: 
+            btn_salvar_loja = st.button("💾 Salvar Pedido Oficial", type="primary", use_container_width=True)
         with c_excel:
             df_export = grid_editado.drop(columns=['codigo'], errors='ignore')
             st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Pedido"), file_name=f"Pedido_{loja_selecionada}.xlsx", use_container_width=True)
-        with c_print: injetar_botao_impressao()
+        with c_print: 
+            injetar_botao_impressao()
 
         if btn_salvar_loja:
             with st.spinner("Gravando pedido..."):
                 cods_tela = grid_editado["codigo"].tolist()
                 if cods_tela:
                     supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(date.today())).in_("codigo_produto", cods_tela).execute()
+                    
                     lista_ins = []
                     for _, r in grid_editado.iterrows():
                         q = converter_para_int_seguro(r["Qtde Pedida"])
-                        if q > 0: lista_ins.append({"data_pedido": str(date.today()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
-                    if lista_ins: supabase.table("pedidos").insert(lista_ins).execute()
-            st.success("Gravado!"); st.rerun()
+                        if q > 0: 
+                            lista_ins.append({"data_pedido": str(date.today()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
+                    
+                    if lista_ins: 
+                        supabase.table("pedidos").insert(lista_ins).execute()
+            st.success("Gravado!")
+            st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 3 — VISÃO FORNECEDORES (RESUMO EDITÁVEL BANDEIRADO)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Visão Fornecedores (Resumo)":
-        st.markdown(f"## 🚚 Resumo Consolidado por Fornecedor — {setor}")
+        st.markdown(f"<div class='no-print'><h2>🚚 Resumo Consolidado por Fornecedor — {setor}</h2></div>", unsafe_allow_html=True)
         
         resp_prod = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
@@ -677,9 +815,13 @@ def iniciar_tela(setor: str):
         df_prod = pd.DataFrame(resp_prod.data)
         df_ped = pd.DataFrame(resp_ped.data)
 
-        if df_prod.empty: st.info("Nenhum produto cadastrado."); return
+        if df_prod.empty: 
+            st.info("Nenhum produto cadastrado.")
+            return
 
-        if 'codigo_erp' not in df_prod.columns: df_prod['codigo_erp'] = df_prod['codigo']
+        if 'codigo_erp' not in df_prod.columns: 
+            df_prod['codigo_erp'] = df_prod['codigo']
+            
         df_prod['codigo_erp'] = df_prod['codigo_erp'].fillna(df_prod['codigo']).astype(int)
 
         codigos_setor = df_prod['codigo'].tolist()
@@ -689,25 +831,30 @@ def iniciar_tela(setor: str):
         if not df_ped.empty:
             df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
             for n in range(1, 9):
-                if n in df_pivot.columns: df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
-        else: df_pivot = pd.DataFrame(columns=['codigo_produto'])
+                if n in df_pivot.columns: 
+                    df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
+        else: 
+            df_pivot = pd.DataFrame(columns=['codigo_produto'])
             
         df_mestre = pd.merge(df_prod, df_pivot, left_on='codigo', right_on='codigo_produto', how='left')
         
         for l in LOJAS_NOMES:
-            if l not in df_mestre.columns: df_mestre[l] = 0.0
+            if l not in df_mestre.columns: 
+                df_mestre[l] = 0.0
             df_mestre[l] = df_mestre[l].fillna(0).astype(int)
 
         if not df_perm_all.empty:
             df_perm_all['loja_nome'] = df_perm_all['loja'].apply(lambda x: f"Loja {int(x):02d}_perm")
             df_perm_pivot = df_perm_all.pivot_table(index='codigo_produto', columns='loja_nome', values='disponivel', aggfunc='last').reset_index()
-        else: df_perm_pivot = pd.DataFrame(columns=['codigo_produto'])
+        else: 
+            df_perm_pivot = pd.DataFrame(columns=['codigo_produto'])
 
         df_mestre = pd.merge(df_mestre, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left')
         
         perm_cols = [f"Loja {n:02d}_perm" for n in range(1, 9)]
         for col in perm_cols:
-            if col not in df_mestre.columns: df_mestre[col] = True
+            if col not in df_mestre.columns: 
+                df_mestre[col] = True
                 
         df_mestre[perm_cols] = df_mestre[perm_cols].fillna(True)
         mask_active = df_mestre[perm_cols].any(axis=1)
@@ -719,7 +866,8 @@ def iniciar_tela(setor: str):
         for l in LOJAS_NOMES:
             df_mestre[l] = df_mestre[l].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
             perm_col = f"{l}_perm"
-            if perm_col in df_mestre.columns: df_mestre.loc[df_mestre[perm_col] != True, l] = "-"
+            if perm_col in df_mestre.columns: 
+                df_mestre.loc[df_mestre[perm_col] != True, l] = "-"
 
         all_edited_frames = []
 
@@ -736,7 +884,8 @@ def iniciar_tela(setor: str):
                     "Produto": st.column_config.TextColumn(disabled=True, width=250),
                     "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
                 }
-                for l in lojas_ativas: col_cfg_f[l] = st.column_config.TextColumn(l, width=85, disabled=False)
+                for l in lojas_ativas: 
+                    col_cfg_f[l] = st.column_config.TextColumn(l, width=85, disabled=False)
                     
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
@@ -745,7 +894,8 @@ def iniciar_tela(setor: str):
                 st.markdown(f'<div class="print-only" style="page-break-inside: avoid;"><h4>🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
                 
                 for l in LOJAS_NOMES:
-                    if l not in edit_df.columns: edit_df[l] = "-"
+                    if l not in edit_df.columns: 
+                        edit_df[l] = "-"
                 
                 edit_df["fornecedor"] = forn
                 all_edited_frames.append(edit_df)
@@ -755,11 +905,13 @@ def iniciar_tela(setor: str):
         if all_edited_frames:
             df_forn_editado_full = pd.concat(all_edited_frames, ignore_index=True)
             c_salvar, c_excel, c_print = st.columns([2, 2, 1])
-            with c_salvar: btn_salvar_forn = st.button("💾 Salvar Ajustes do Resumo", type="primary", use_container_width=True)
+            with c_salvar: 
+                btn_salvar_forn = st.button("💾 Salvar Ajustes do Resumo", type="primary", use_container_width=True)
             with c_excel:
                 df_export = df_forn_editado_full.drop(columns=['codigo'], errors='ignore')
                 st.download_button("📊 Exportar Fornecedores", data=gerar_excel_fornecedores(df_export, f"Fornecedores"), file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
-            with c_print: injetar_botao_impressao()
+            with c_print: 
+                injetar_botao_impressao()
 
             if btn_salvar_forn:
                 with st.spinner("Atualizando registros..."):
@@ -768,25 +920,32 @@ def iniciar_tela(setor: str):
                         for loja_nome in LOJAS_NOMES:
                             n_loja = int(loja_nome.split()[-1])
                             supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(date.today())).in_("codigo_produto", cods).execute()
+                            
                             lista_ins = []
                             for _, r in df_forn_editado_full.iterrows():
                                 q = converter_para_int_seguro(r[loja_nome])
-                                if q > 0: lista_ins.append({"data_pedido": str(date.today()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
-                            if lista_ins: supabase.table("pedidos").insert(lista_ins).execute()
-                st.success("Alterações consolidadas!"); st.rerun()
+                                if q > 0: 
+                                    lista_ins.append({"data_pedido": str(date.today()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
+                            
+                            if lista_ins: 
+                                supabase.table("pedidos").insert(lista_ins).execute()
+                st.success("Alterações consolidadas!")
+                st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 4 — CATÁLOGO DE PRODUTOS
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Catálogo de Produtos":
-        st.markdown(f"## 🗂️ Gestão de Catálogo e Permissões por Loja — {setor}")
+        st.markdown(f"<div class='no-print'><h2>🗂️ Gestão de Catálogo e Permissões por Loja — {setor}</h2></div>", unsafe_allow_html=True)
 
         resp_prod = supabase.table("produtos").select("*").eq("setor", setor).execute()
         df_prod = pd.DataFrame(resp_prod.data)
 
-        if df_prod.empty: df_prod = pd.DataFrame(columns=['codigo', 'codigo_erp', 'descricao', 'fornecedor', 'nome_personalizado', 'setor', 'ativo'])
+        if df_prod.empty: 
+            df_prod = pd.DataFrame(columns=['codigo', 'codigo_erp', 'descricao', 'fornecedor', 'nome_personalizado', 'setor', 'ativo'])
         else:
-            if 'codigo_erp' not in df_prod.columns: df_prod['codigo_erp'] = df_prod['codigo']
+            if 'codigo_erp' not in df_prod.columns: 
+                df_prod['codigo_erp'] = df_prod['codigo']
             df_prod['codigo_erp'] = df_prod['codigo_erp'].fillna(df_prod['codigo']).astype(int)
 
         codigos_setor = df_prod['codigo'].tolist() if not df_prod.empty else []
@@ -795,19 +954,27 @@ def iniciar_tela(setor: str):
         if not df_perm.empty:
             df_perm['loja_nome'] = df_perm['loja'].apply(lambda x: f"Loja {int(x):02d}")
             df_perm_pivot = df_perm.pivot_table(index='codigo_produto', columns='loja_nome', values='disponivel', aggfunc='last').reset_index()
-        else: df_perm_pivot = pd.DataFrame(columns=['codigo_produto'] + LOJAS_NOMES)
+        else: 
+            df_perm_pivot = pd.DataFrame(columns=['codigo_produto'] + LOJAS_NOMES)
 
-        if not df_prod.empty: df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'], errors='ignore')
-        else: df_cat_completo = pd.DataFrame(columns=['codigo', 'codigo_erp', 'descricao', 'fornecedor', 'nome_personalizado'] + LOJAS_NOMES)
+        if not df_prod.empty: 
+            df_cat_completo = pd.merge(df_prod, df_perm_pivot, left_on='codigo', right_on='codigo_produto', how='left').drop(columns=['codigo_produto'], errors='ignore')
+        else: 
+            df_cat_completo = pd.DataFrame(columns=['codigo', 'codigo_erp', 'descricao', 'fornecedor', 'nome_personalizado'] + LOJAS_NOMES)
         
         for l in LOJAS_NOMES: 
-            if l not in df_cat_completo.columns: df_cat_completo[l] = True
-            else: df_cat_completo[l] = df_cat_completo[l].fillna(True).astype(bool)
+            if l not in df_cat_completo.columns: 
+                df_cat_completo[l] = True
+            else: 
+                df_cat_completo[l] = df_cat_completo[l].fillna(True).astype(bool)
         
-        if 'nome_personalizado' not in df_cat_completo.columns: df_cat_completo['nome_personalizado'] = ""
-        else: df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
+        if 'nome_personalizado' not in df_cat_completo.columns: 
+            df_cat_completo['nome_personalizado'] = ""
+        else: 
+            df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
 
-        if not df_cat_completo.empty: df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao']).reset_index(drop=True)
+        if not df_cat_completo.empty: 
+            df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao']).reset_index(drop=True)
 
         col_cfg_c = {
             "codigo": None,
@@ -816,7 +983,8 @@ def iniciar_tela(setor: str):
             "nome_personalizado": st.column_config.TextColumn("Nome Manual", width=160),
             "fornecedor": st.column_config.TextColumn("Fornecedor", width=130)
         }
-        for l in LOJAS_NOMES: col_cfg_c[l] = st.column_config.CheckboxColumn(l)
+        for l in LOJAS_NOMES: 
+            col_cfg_c[l] = st.column_config.CheckboxColumn(l)
 
         cols_exibicao = ["fornecedor", "codigo", "codigo_erp", "descricao", "nome_personalizado"] + LOJAS_NOMES
         edited_cat = st.data_editor(df_cat_completo[cols_exibicao], use_container_width=True, hide_index=True, column_config=col_cfg_c, num_rows="dynamic", key="catalogo_editor")
@@ -828,8 +996,10 @@ def iniciar_tela(setor: str):
         st.markdown("<br>", unsafe_allow_html=True)
         col_btn_salvar, col_btn_erp = st.columns(2)
         
-        with col_btn_salvar: btn_salvar = st.button("💾 Salvar Matriz do Catálogo", type="primary", use_container_width=True)
-        with col_btn_erp: btn_puxar_erp = st.button("📥 Puxar Nomes do ERP", use_container_width=True)
+        with col_btn_salvar: 
+            btn_salvar = st.button("💾 Salvar Matriz do Catálogo", type="primary", use_container_width=True)
+        with col_btn_erp: 
+            btn_puxar_erp = st.button("📥 Puxar Nomes do ERP", use_container_width=True)
 
         if btn_salvar:
             state = st.session_state.get("catalogo_editor")
@@ -848,6 +1018,7 @@ def iniciar_tela(setor: str):
                             supabase.table("pedidos").delete().eq("codigo_produto", cod_p).execute()
                             supabase.table("medias_90d").delete().eq("codigo_produto", cod_p).execute()
                             supabase.table("produtos").delete().eq("codigo", cod_p).execute()
+                            
                             if cod_p in codigos_globais: codigos_globais.remove(cod_p)
                             if cod_p in codigos_conhecidos: codigos_conhecidos.remove(cod_p)
 
@@ -855,27 +1026,36 @@ def iniciar_tela(setor: str):
                         for idx_str, changes in state["edited_rows"].items():
                             idx = int(idx_str)
                             cod_p_original = int(df_cat_completo.iloc[idx]["codigo"])
+                            
                             prod_changes = {}
-                            if "descricao" in changes: prod_changes["descricao"] = str(changes["descricao"])
-                            if "fornecedor" in changes: prod_changes["fornecedor"] = str(changes["fornecedor"])
+                            if "descricao" in changes: 
+                                prod_changes["descricao"] = str(changes["descricao"])
+                            if "fornecedor" in changes: 
+                                prod_changes["fornecedor"] = str(changes["fornecedor"])
                             if "nome_personalizado" in changes: 
                                 val_np = changes["nome_personalizado"]
                                 prod_changes["nome_personalizado"] = str(val_np).strip() if pd.notna(val_np) and str(val_np).strip() != "" else None
                             if "codigo_erp" in changes:
                                 try: prod_changes["codigo_erp"] = int(changes["codigo_erp"])
                                 except: pass
-                            if prod_changes: supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
+                                
+                            if prod_changes: 
+                                supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
                     for _, row in edited_cat.iterrows():
                         c_pk = row.get("codigo")
                         c_erp = row.get("codigo_erp") 
+                        
                         if pd.isna(c_pk) or str(c_pk).strip() == "":
-                            if pd.isna(c_erp) or str(c_erp).strip() == "": continue
+                            if pd.isna(c_erp) or str(c_erp).strip() == "": 
+                                continue
+                                
                             cod_erp_digitado = int(c_erp)
                             cod_final = cod_erp_digitado
                             forn_add = str(row.get("fornecedor", "Box")).strip()
                             desc_add = str(row.get("descricao", "Novo Produto")).strip()
                             np_add = str(row.get("nome_personalizado", "")).strip() if pd.notna(row.get("nome_personalizado")) and str(row.get("nome_personalizado")).strip() != "" else None
+                            
                             if cod_final in codigos_globais:
                                 base_str = str(cod_final)
                                 for i in range(1, 100):
@@ -884,13 +1064,17 @@ def iniciar_tela(setor: str):
                                         cod_final = tent
                                         break
                                 st.toast(f"🤖 Gerado código interno invisível {cod_final} para o item {cod_erp_digitado} do ERP.", icon="✨")
+                                
                             mapa_conflitos[(cod_erp_digitado, forn_add)] = cod_final
+                            
                             supabase.table("produtos").insert({
                                 "codigo": cod_final, "codigo_erp": cod_erp_digitado,
                                 "descricao": desc_add, "fornecedor": forn_add, 
                                 "nome_personalizado": np_add, "setor": setor, "ativo": True
                             }).execute()
-                            codigos_globais.append(cod_final); codigos_conhecidos.add(cod_final)
+                            
+                            codigos_globais.append(cod_final)
+                            codigos_conhecidos.add(cod_final)
 
                     lista_perms_geral = []
                     codigos_processados_perms = set()
@@ -899,9 +1083,14 @@ def iniciar_tela(setor: str):
                         c_pk = row.get("codigo")
                         c_erp = row.get("codigo_erp")
                         f_tela = str(row.get("fornecedor", "")).strip()
-                        if pd.notna(c_pk) and str(c_pk).strip() != "": c_final = int(c_pk)
-                        else: c_final = mapa_conflitos.get((int(c_erp), f_tela), None)
-                        if not c_final: continue
+                        
+                        if pd.notna(c_pk) and str(c_pk).strip() != "": 
+                            c_final = int(c_pk)
+                        else: 
+                            c_final = mapa_conflitos.get((int(c_erp), f_tela), None)
+                            
+                        if not c_final: 
+                            continue
                         
                         codigos_processados_perms.add(c_final)
                         for num_loja in range(1, 9):
@@ -910,17 +1099,23 @@ def iniciar_tela(setor: str):
 
                     codigos_lista = list(codigos_processados_perms)
                     if codigos_lista:
-                        for i in range(0, len(codigos_lista), 200): supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_lista[i:i+200]).execute()
-                        for i in range(0, len(lista_perms_geral), 1000): supabase.table("produtos_lojas").insert(lista_perms_geral[i:i+1000]).execute()
+                        for i in range(0, len(codigos_lista), 200): 
+                            supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_lista[i:i+200]).execute()
+                        for i in range(0, len(lista_perms_geral), 1000): 
+                            supabase.table("produtos_lojas").insert(lista_perms_geral[i:i+1000]).execute()
 
-                    st.success("✅ Automação concluída!"); time.sleep(1.5); st.rerun()
-                except Exception as e: st.error(f"⚠️ Erro processando: {e}")
+                    st.success("✅ Automação concluída!")
+                    time.sleep(1.5)
+                    st.rerun()
+                except Exception as e: 
+                    st.error(f"⚠️ Erro processando: {e}")
 
         if btn_puxar_erp:
             with st.spinner("Buscando nomes oficias usando Cód. ERP..."):
                 try:
                     cods_erp = [int(c) for c in edited_cat["codigo_erp"].tolist() if pd.notna(c) and str(c).strip() != ""]
-                    if not cods_erp: st.warning("Nenhum código encontrado.")
+                    if not cods_erp: 
+                        st.warning("Nenhum código encontrado.")
                     else:
                         cods_str = ", ".join(map(str, set(cods_erp)))
                         query_nomes = f"SELECT cod, descricao FROM python_ajuste_cadastro WHERE cod IN ({cods_str})"
@@ -931,8 +1126,13 @@ def iniciar_tela(setor: str):
                                 cod_oficial = int(row["cod"])
                                 desc_erp = str(row["descricao"])
                                 supabase.table("produtos").update({"descricao": desc_erp}).eq("codigo_erp", cod_oficial).execute()
-                            st.success("✅ Nomes atualizados em todos os fornecedores!"); time.sleep(1); st.rerun()
-                        else: st.info("Nenhum nome encontrado.")
+                            st.success("✅ Nomes atualizados em todos os fornecedores!")
+                            time.sleep(1)
+                            st.rerun()
+                        else: 
+                            st.info("Nenhum nome encontrado.")
                 except Exception as e:
-                    if "No database configured" in str(e) or "missing" in str(e).lower(): st.error("⚠️ Aviso: Credenciais do PostgreSQL não configuradas ou inacessíveis.")
-                    else: st.error(f"⚠️ Erro ao buscar nomes no banco ERP: {e}")
+                    if "No database configured" in str(e) or "missing" in str(e).lower(): 
+                        st.error("⚠️ Aviso: Credenciais do PostgreSQL não configuradas ou inacessíveis.")
+                    else: 
+                        st.error(f"⚠️ Erro ao buscar nomes no banco ERP: {e}")
