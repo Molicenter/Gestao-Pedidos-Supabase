@@ -5,13 +5,12 @@ import time
 from datetime import date
 from supabase import create_client, Client
 
-# NOVAS IMPORTAÇÕES PARA ESTILIZAR O EXCEL
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚙️ CONSTANTES, ESTILOS E CONEXÕES GLOBAIS
+# ─────────────────────────────────────────────────────────────────────────────
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ⚙️ CONSTANTES E CONEXÕES GLOBAIS
-# ─────────────────────────────────────────────────────────────────────────────
 LOJAS_NOMES = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
 
 def obter_supabase() -> Client:
@@ -38,7 +37,6 @@ def buscar_estoque_erp(loja_nome, codigos_erp, setor):
     if not codigos_erp: return pd.DataFrame(columns=["Código", "Estoque"])
     loja_id = int(loja_nome.split()[-1])
     loja_id_str = f"{loja_id:03d}" 
-    # Usa os códigos ERP limpos para buscar no banco
     cods_str = ", ".join(map(str, set(codigos_erp)))
     
     coluna_alvo = "estoqueemb" if setor == "Embalagem" else "estoque"
@@ -53,8 +51,11 @@ def buscar_estoque_erp(loja_nome, codigos_erp, setor):
         st.error(f"Erro ao buscar estoque: {e}")
         return pd.DataFrame({"Código": codigos_erp, "Estoque": 0})
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 📊 MOTORES DE EXPORTAÇÃO EXCEL CUSTOMIZADOS (OPENPYXL)
+# ─────────────────────────────────────────────────────────────────────────────
 def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
-    # 1. RENOMEANDO AS COLUNAS CONFORME SOLICITADO ANTES DE EXPORTAR
+    """Padronização para Visão de Lojas, Separação e Fechamento Geral"""
     df_export = df.copy()
     df_export = df_export.rename(columns={
         "Cód. ERP": "Código",
@@ -63,7 +64,6 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         "Estoque ERP": "Estoque"
     })
 
-    # 2. LIMPANDO OS DADOS PARA O EXCEL
     def limpar_valor_excel(v):
         if pd.isna(v): return None
         v_str = str(v).strip()
@@ -80,34 +80,27 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         if any(x in col_upper for x in ["LOJA", "PEDIDO", "ESTOQUE", "TOTAL", "MÉDIA"]):
             df_export[col] = df_export[col].apply(limpar_valor_excel)
 
-    # 3. GERANDO O EXCEL
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30])
         worksheet = writer.sheets[nome_aba[:30]]
 
-        # 🎨 DEFINIÇÃO DE ESTILOS
         fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
         fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
         
-        border_thin = Border(left=Side(style='thin', color='000000'), 
-                             right=Side(style='thin', color='000000'),
-                             top=Side(style='thin', color='000000'), 
-                             bottom=Side(style='thin', color='000000'))
+        border_thin = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'),
+                             top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
         
         align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-        # ──────────────────────────────────────────────────────────
-        # 🔍 IDENTIFICAÇÃO DE COLUNAS (Agora com efeito Zebrado nas Lojas)
-        # ──────────────────────────────────────────────────────────
         colunas_verdes = []
         col_total_idx = None
         cols_para_soma = []
-        contador_loja = 0  # <--- Criamos um contador para saber qual loja é
+        contador_loja = 0 
 
         for col_num, column_title in enumerate(df_export.columns, 1):
             col_name = str(column_title).upper()
@@ -115,31 +108,20 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
             if "LOJA" in col_name:
                 cols_para_soma.append(col_num)
                 contador_loja += 1
-                # Se for loja ímpar (1, 3, 5, 7) pinta de verde. Se for par (2, 4, 6, 8) ignora (fica branco).
                 if contador_loja % 2 != 0:
                     colunas_verdes.append(col_num)
-            
-            # Mantemos verde as outras colunas de métricas fixas
             elif any(x in col_name for x in ["PEDIDO", "TOTAL", "MÉDIA", "ESTOQUE"]):
                 colunas_verdes.append(col_num)
                 
             if "TOTAL" in col_name:
                 col_total_idx = col_num
-        # ──────────────────────────────────────────────────────────
 
-        # 🖌️ CABEÇALHO
         for col_num, cell in enumerate(worksheet[1], 1):
-            cell.fill = fill_header
-            cell.font = font_header
-            cell.border = border_thin
-            cell.alignment = align_center
+            cell.fill = fill_header; cell.font = font_header; cell.border = border_thin; cell.alignment = align_center
 
-        # 🖌️ LINHAS E CORES
         for row_num, row in enumerate(worksheet.iter_rows(min_row=2, max_row=worksheet.max_row, min_col=1, max_col=worksheet.max_column), 2):
             for cell in row:
-                cell.border = border_thin
-                cell.font = font_bold
-                
+                cell.border = border_thin; cell.font = font_bold
                 nome_col_atual = str(df_export.columns[cell.column - 1]).upper()
                 if any(x in nome_col_atual for x in ["FORNECEDOR", "DESCRIÇÃO", "PRODUTO"]):
                     cell.alignment = align_left
@@ -149,50 +131,134 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
                 if cell.column in colunas_verdes:
                     cell.fill = fill_green
 
-        # 🧮 INJETANDO FÓRMULA EXCEL NA COLUNA DE TOTAL
         if col_total_idx and cols_para_soma:
             letra_total = get_column_letter(col_total_idx)
             letra_primeira = get_column_letter(min(cols_para_soma))
             letra_ultima = get_column_letter(max(cols_para_soma))
-            
             for row_num in range(2, worksheet.max_row + 1):
                 worksheet[f"{letra_total}{row_num}"].value = f'=IF(SUM({letra_primeira}{row_num}:{letra_ultima}{row_num})>0, SUM({letra_primeira}{row_num}:{letra_ultima}{row_num}), "")'
 
-        # 📏 LARGURA DAS COLUNAS
         for col_num, column_title in enumerate(df_export.columns, 1):
             letra = get_column_letter(col_num)
             col_name = str(column_title).upper()
-            
-            if "FORNECEDOR" in col_name:
-                worksheet.column_dimensions[letra].width = 18
-            elif "DESCRI" in col_name or "PRODUTO" in col_name:
-                worksheet.column_dimensions[letra].width = 45
-            elif "CÓDIGO" in col_name:
-                worksheet.column_dimensions[letra].width = 12
-            elif "MÉDIA" in col_name or "ESTOQUE" in col_name:
-                worksheet.column_dimensions[letra].width = 12
-            else:
-                worksheet.column_dimensions[letra].width = 9 
+            if "FORNECEDOR" in col_name: worksheet.column_dimensions[letra].width = 18
+            elif "DESCRI" in col_name or "PRODUTO" in col_name: worksheet.column_dimensions[letra].width = 45
+            elif "CÓDIGO" in col_name: worksheet.column_dimensions[letra].width = 12
+            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: worksheet.column_dimensions[letra].width = 12
+            else: worksheet.column_dimensions[letra].width = 9 
 
-        # 🖨️ CONFIGURAÇÃO DE IMPRESSÃO
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
         worksheet.sheet_properties.pageSetUpPr.fitToPage = True
-        worksheet.page_setup.fitToWidth = 1
-        worksheet.page_setup.fitToHeight = 0 
-
-        # 📏 CONFIGURAÇÃO DE MARGENS (1 cm = 1 / 2.54 polegadas)
-        worksheet.page_margins.left = 1 / 2.54
-        worksheet.page_margins.right = 1 / 2.54
-        worksheet.page_margins.top = 1 / 2.54
-        worksheet.page_margins.bottom = 1 / 2.54
-        
-        # Ajustando cabeçalho e rodapé para não encavalar com a margem (0.5 cm)
-        worksheet.page_margins.header = 0.5 / 2.54
-        worksheet.page_margins.footer = 0.5 / 2.54
+        worksheet.page_setup.fitToWidth = 1; worksheet.page_setup.fitToHeight = 0 
+        worksheet.page_margins.left = 1 / 2.54; worksheet.page_margins.right = 1 / 2.54
+        worksheet.page_margins.top = 1 / 2.54; worksheet.page_margins.bottom = 1 / 2.54
+        worksheet.page_margins.header = 0.5 / 2.54; worksheet.page_margins.footer = 0.5 / 2.54
 
     return output.getvalue()
 
+def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
+    """Padronização Exclusiva por Blocos Organizacionais para Visão Fornecedores"""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        worksheet = writer.book.create_sheet(nome_aba[:30])
+        writer.book.active = worksheet
+        
+        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
+        fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+        
+        font_header = Font(color="FFFFFF", bold=True)
+        font_bold = Font(bold=True)
+        font_normal = Font(bold=False)
+        
+        border_thin = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'),
+                             top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
+        
+        align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        def limpar(v):
+            if pd.isna(v): return ""
+            v_str = str(v).strip()
+            if v_str in ["", "-", "0", "0.0", "nan"]: return ""
+            try:
+                f = float(v_str)
+                if f == 0: return ""
+                return int(f) if f.is_integer() else f
+            except ValueError:
+                return v_str
+
+        worksheet.column_dimensions['A'].width = 12  
+        worksheet.column_dimensions['B'].width = 45  
+        for col_idx in range(3, 12): 
+            worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
+
+        hoje_str = date.today().strftime("%d/%m/%Y")
+        worksheet["A1"] = "Tipo"
+        worksheet["B1"] = "Descrição"
+        worksheet["C1"] = f"Pedidos do dia {hoje_str}"
+        worksheet.merge_cells("C1:K1") 
+        
+        for col_idx in range(1, 12):
+            cell = worksheet.cell(row=1, column=col_idx)
+            cell.fill = fill_header; cell.font = font_header; cell.border = border_thin; cell.alignment = align_center
+
+        current_row = 2
+        lojas_cols = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
+        
+        forns = sorted(df["fornecedor"].dropna().unique())
+        for forn in forns:
+            df_f = df[df["fornecedor"] == forn]
+            
+            worksheet.cell(row=current_row, column=1).value = ""
+            worksheet.cell(row=current_row, column=2).value = forn
+            for i, loja in enumerate(lojas_cols):
+                worksheet.cell(row=current_row, column=3+i).value = loja
+            worksheet.cell(row=current_row, column=11).value = "TOTAL"
+            
+            for col_idx in range(1, 12):
+                cell = worksheet.cell(row=current_row, column=col_idx)
+                cell.fill = fill_header; cell.font = font_header; cell.border = border_thin; cell.alignment = align_center
+            
+            current_row += 1
+            
+            for _, r in df_f.iterrows():
+                c1 = worksheet.cell(row=current_row, column=1, value=limpar(r.get("Cód. ERP", "")))
+                c1.alignment = align_center; c1.border = border_thin; c1.font = font_normal
+                
+                c2 = worksheet.cell(row=current_row, column=2, value=limpar(r.get("Produto", "")))
+                c2.alignment = align_left; c2.border = border_thin; c2.font = font_normal
+                
+                for i, loja in enumerate(lojas_cols):
+                    c_loja = worksheet.cell(row=current_row, column=3+i, value=limpar(r.get(loja, "")))
+                    c_loja.alignment = align_center; c_loja.border = border_thin; c_loja.font = font_bold
+                    if i % 2 == 0:
+                        c_loja.fill = fill_green
+                
+                c_total = worksheet.cell(row=current_row, column=11)
+                c_total.value = f'=IF(SUM(C{current_row}:J{current_row})>0, SUM(C{current_row}:J{current_row}), "")'
+                c_total.alignment = align_center; c_total.border = border_thin; c_total.font = font_bold
+                c_total.fill = fill_green
+                
+                current_row += 1
+                
+        if 'Sheet' in writer.book.sheetnames:
+            writer.book.remove(writer.book['Sheet'])
+
+        worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
+        worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
+        worksheet.sheet_properties.pageSetUpPr.fitToPage = True
+        worksheet.page_setup.fitToWidth = 1; worksheet.page_setup.fitToHeight = 0 
+        
+        worksheet.page_margins.left = 1 / 2.54; worksheet.page_margins.right = 1 / 2.54
+        worksheet.page_margins.top = 1 / 2.54; worksheet.page_margins.bottom = 1 / 2.54
+        worksheet.page_margins.header = 0.5 / 2.54; worksheet.page_margins.footer = 0.5 / 2.54
+
+    return output.getvalue()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🖨️ OUTROS UTILS DA INTERFACE
+# ─────────────────────────────────────────────────────────────────────────────
 def injetar_botao_impressao():
     st.components.v1.html(
         """
@@ -307,20 +373,18 @@ def iniciar_tela(setor: str):
                 view_sql = dict_views[view_escolhida]
                 with st.spinner(f"Sincronizando {view_sql}..."):
                     try:
-                        # Busca código interno (PK) e o código oficial do ERP
                         resp_prod = supabase.table("produtos").select("codigo, codigo_erp").eq("setor", setor).execute()
                         df_prod_map = pd.DataFrame(resp_prod.data)
                         
                         if df_prod_map.empty:
                             st.warning("Nenhum produto cadastrado neste setor para atualizar as médias.")
                         else:
-                            # ✅ CORREÇÃO 1: Renomeamos a PK para evitar conflito com a coluna do banco do ERP
+                            # ✅ FIX: Renomeando a coluna de PK para evitar colisão/KeyError com o merge do ERP
                             df_prod_map = df_prod_map.rename(columns={'codigo': 'codigo_pk_interna'})
                             
                             if 'codigo_erp' not in df_prod_map.columns: df_prod_map['codigo_erp'] = df_prod_map['codigo_pk_interna']
                             df_prod_map['codigo_erp'] = df_prod_map['codigo_erp'].fillna(df_prod_map['codigo_pk_interna']).astype(int)
                             
-                            # Consulta o ERP usando apenas os códigos ERP limpos
                             codigos_erp_setor = df_prod_map['codigo_erp'].unique().tolist()
                             df_erp = conn_pg.query(f'SELECT * FROM "{view_sql}"', ttl=0)
                             
@@ -331,10 +395,7 @@ def iniciar_tela(setor: str):
                                 if df_erp_setor.empty:
                                     st.info("A view retornou vazia para os produtos deste setor.")
                                 else:
-                                    # Cruza o que voltou do ERP com nossos códigos internos
                                     df_merged = pd.merge(df_erp_setor, df_prod_map, left_on=c_cod_erp, right_on='codigo_erp', how='inner')
-                                    
-                                    # ✅ CORREÇÃO 2: Agora puxamos nossa chave invisível pelo novo nome
                                     codigos_pks = df_merged['codigo_pk_interna'].unique().tolist()
                                     
                                     for i in range(0, len(codigos_pks), 200):
@@ -344,7 +405,7 @@ def iniciar_tela(setor: str):
                                     for _, row in df_merged.iterrows():
                                         lista_insert.append({
                                             "loja": int(row[c_loja]),
-                                            "codigo_produto": int(row['codigo_pk_interna']), # ✅ CORREÇÃO 3: Salvando com a PK correta
+                                            "codigo_produto": int(row['codigo_pk_interna']), 
                                             "media_dia": float(row[c_med]) if pd.notna(row[c_med]) else 0.0
                                         })
                                     
@@ -387,7 +448,6 @@ def iniciar_tela(setor: str):
     if perfil_navegacao == "Separação e Fechamento":
         st.markdown(f"## 📊 Separação e Fechamento — {setor}")
         
-        # Puxa todas as colunas necessárias, incluindo codigo_erp
         resp_prod = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
         
@@ -457,12 +517,10 @@ def iniciar_tela(setor: str):
             if perm_col in df_consolidado.columns: df_consolidado.loc[df_consolidado[perm_col] != True, loja] = "-"
 
         df_consolidado = df_consolidado.rename(columns={'codigo_erp': 'Cód. ERP', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
-        
-        # O DataFrame para exibição inclui a PK "codigo" mas ela ficará invisível
         df_exibicao = df_consolidado[["Fornecedor", "codigo", "Cód. ERP", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by=['Fornecedor', 'Descrição'])
 
         col_cfg = {
-            "codigo": None, # PK Oculta
+            "codigo": None, 
             "Cód. ERP": st.column_config.NumberColumn("Cód. ERP", disabled=True, format="%d", width=80), 
             "Fornecedor": st.column_config.TextColumn(disabled=True, width=110), 
             "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
@@ -475,14 +533,13 @@ def iniciar_tela(setor: str):
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
         with c_salvar: btn_salvar = st.button("💾 Salvar Ajustes Administrativos", type="primary", use_container_width=True)
         with c_excel:
-            # Excel exporta sem o código invisível
             df_export = df_editado.drop(columns=['codigo'], errors='ignore')
             st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Fechamento {setor}"), file_name=f"Separacao_Fechamento_{setor}.xlsx", use_container_width=True)
         with c_print: injetar_botao_impressao()
             
         if btn_salvar:
             with st.spinner("Atualizando registros..."):
-                cods = df_editado["codigo"].tolist() # Pega a PK correta
+                cods = df_editado["codigo"].tolist()
                 if cods:
                     for loja_nome in LOJAS_NOMES:
                         n_loja = int(loja_nome.split()[-1])
@@ -547,17 +604,15 @@ def iniciar_tela(setor: str):
 
         st.metric(label="📝 Seus Itens Preenchidos", value=f"{itens_digitados} produtos")
 
-        # Passa o CÓDIGO ERP para buscar o estoque corretamente!
         codigos_busca_erp = df_loja["codigo_erp"].dropna().astype(int).unique().tolist()
         df_estoque = buscar_estoque_erp(loja_selecionada, codigos_busca_erp, setor)
         df_loja = pd.merge(df_loja, df_estoque, left_on='codigo_erp', right_on='Código', how='left')
         df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
         
-        # 🟢 CONVERSÃO DE TIPO APLICADA AQUI PARA DESTRAVAR A INTERFACE
         df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
 
         df_final_grid = pd.DataFrame({
-            'codigo': df_loja['codigo'], # PK Oculta
+            'codigo': df_loja['codigo'], 
             'Cód. ERP': df_loja['codigo_erp'],
             'Fornecedor': df_loja['fornecedor'], 
             'Descrição': df_loja['descricao'],
@@ -584,7 +639,6 @@ def iniciar_tela(setor: str):
             "Qtde Pedida": st.column_config.TextColumn("Qtde", width=100)
         }
 
-        # 🟢 KEY DINÂMICA ADICIONADA AQUI
         grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=True, key=f"grid_loja_{num_loja}")
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
@@ -607,7 +661,7 @@ def iniciar_tela(setor: str):
             st.success("Gravado!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 3 — VISÃO FORNECEDORES (RESUMO EDITÁVEL)
+    # ROTA 3 — VISÃO FORNECEDORES (RESUMO EDITÁVEL BANDEIRADO)
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Visão Fornecedores (Resumo)":
         st.markdown(f"## 🚚 Resumo Consolidado por Fornecedor — {setor}")
@@ -671,9 +725,7 @@ def iniciar_tela(setor: str):
 
         for forn in sorted(df_mestre["fornecedor"].dropna().unique()):
             df_forn_bruto = df_mestre[df_mestre["fornecedor"] == forn]
-            
             lojas_ativas = [l for l in LOJAS_NOMES if not (df_forn_bruto[l] == "-").all()]
-            
             df_forn_view = df_forn_bruto[["codigo", "codigo_erp", "descricao"] + lojas_ativas + ["TOTAL GERAL"]].rename(columns={'codigo_erp': 'Cód. ERP', 'descricao': 'Produto'}).sort_values(by='Produto')
             
             with st.container(border=True):
@@ -684,8 +736,6 @@ def iniciar_tela(setor: str):
                     "Produto": st.column_config.TextColumn(disabled=True, width=250),
                     "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
                 }
-                
-                # 🟢 MUDANÇA AQUI: Largura ajustada para 85px para caber o texto perfeitamente
                 for l in lojas_ativas: col_cfg_f[l] = st.column_config.TextColumn(l, width=85, disabled=False)
                     
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
@@ -693,7 +743,9 @@ def iniciar_tela(setor: str):
                 for l in LOJAS_NOMES:
                     if l not in edit_df.columns:
                         edit_df[l] = "-"
-                        
+                
+                # ✅ INSERÇÃO: Alimenta o Fornecedor no DataFrame para remontagem estrutural no openpyxl
+                edit_df["fornecedor"] = forn
                 all_edited_frames.append(edit_df)
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -704,7 +756,8 @@ def iniciar_tela(setor: str):
             with c_salvar: btn_salvar_forn = st.button("💾 Salvar Ajustes do Resumo", type="primary", use_container_width=True)
             with c_excel:
                 df_export = df_forn_editado_full.drop(columns=['codigo'], errors='ignore')
-                st.download_button("📊 Exportar Fornecedores", data=gerar_excel_download(df_export, f"Fornecedores"), file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
+                # ✅ MUDANÇA: Chama o gerador específico bandeirado por fornecedores
+                st.download_button("📊 Exportar Fornecedores", data=gerar_excel_fornecedores(df_export, f"Fornecedores"), file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
             with c_print: injetar_botao_impressao()
 
             if btn_salvar_forn:
@@ -722,7 +775,7 @@ def iniciar_tela(setor: str):
                 st.success("Alterações consolidadas!"); st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ROTA 4 — CATÁLOGO DE PRODUTOS (COM DELEÇÃO BLINDADA)
+    # ROTA 4 — CATÁLOGO DE PRODUTOS
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Catálogo de Produtos":
         st.markdown(f"## 🗂️ Gestão de Catálogo e Permissões por Loja — {setor}")
@@ -761,7 +814,7 @@ def iniciar_tela(setor: str):
             df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao']).reset_index(drop=True)
 
         col_cfg_c = {
-            "codigo": None, # PK 100% INVISÍVEL
+            "codigo": None,
             "codigo_erp": st.column_config.NumberColumn("Cód. ERP", format="%d", width=80), 
             "descricao": st.column_config.TextColumn("Nome Prime", width=180), 
             "nome_personalizado": st.column_config.TextColumn("Nome Manual", width=160),
@@ -769,9 +822,7 @@ def iniciar_tela(setor: str):
         }
         for l in LOJAS_NOMES: col_cfg_c[l] = st.column_config.CheckboxColumn(l)
 
-        # O Usuário digita apenas no 'codigo_erp'
         cols_exibicao = ["fornecedor", "codigo", "codigo_erp", "descricao", "nome_personalizado"] + LOJAS_NOMES
-
         edited_cat = st.data_editor(df_cat_completo[cols_exibicao], use_container_width=True, hide_index=True, column_config=col_cfg_c, num_rows="dynamic", key="catalogo_editor")
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -790,27 +841,21 @@ def iniciar_tela(setor: str):
                     
                     mapa_conflitos = {}
 
-                    # 1. DELETES BLINDADOS (Apaga filhos antes do pai)
                     if state and state.get("deleted_rows"):
                         for idx in state["deleted_rows"]:
                             cod_p = int(df_cat_completo.iloc[idx]["codigo"])
-                            
-                            # Limpeza preventiva para não dar erro de Foreign Key
                             supabase.table("produtos_lojas").delete().eq("codigo_produto", cod_p).execute()
                             supabase.table("pedidos").delete().eq("codigo_produto", cod_p).execute()
                             supabase.table("medias_90d").delete().eq("codigo_produto", cod_p).execute()
-                            
-                            # Agora apaga o mestre
                             supabase.table("produtos").delete().eq("codigo", cod_p).execute()
                             
                             if cod_p in codigos_globais: codigos_globais.remove(cod_p)
                             if cod_p in codigos_conhecidos: codigos_conhecidos.remove(cod_p)
 
-                    # 2. EDITS
                     if state and state.get("edited_rows"):
                         for idx_str, changes in state["edited_rows"].items():
                             idx = int(idx_str)
-                            cod_p_original = int(df_cat_completo.iloc[idx]["codigo"]) # PK original não muda
+                            cod_p_original = int(df_cat_completo.iloc[idx]["codigo"])
                             
                             prod_changes = {}
                             if "descricao" in changes: prod_changes["descricao"] = str(changes["descricao"])
@@ -825,13 +870,11 @@ def iniciar_tela(setor: str):
                             if prod_changes:
                                 supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
-                    # 3. ADDITIONS
                     for _, row in edited_cat.iterrows():
                         c_pk = row.get("codigo")
                         c_erp = row.get("codigo_erp") 
                         
                         if pd.isna(c_pk) or str(c_pk).strip() == "":
-                            # É UMA LINHA NOVA
                             if pd.isna(c_erp) or str(c_erp).strip() == "": continue
                             
                             cod_erp_digitado = int(c_erp)
@@ -860,7 +903,6 @@ def iniciar_tela(setor: str):
                             codigos_globais.append(cod_final)
                             codigos_conhecidos.add(cod_final)
 
-                    # 4. UPSERT PERMISSÕES
                     lista_perms_geral = []
                     codigos_processados_perms = set()
                     
@@ -869,7 +911,6 @@ def iniciar_tela(setor: str):
                         c_erp = row.get("codigo_erp")
                         f_tela = str(row.get("fornecedor", "")).strip()
                         
-                        # Se já era velho, usa o PK oculto. Se é novo, busca pelo mapa.
                         if pd.notna(c_pk) and str(c_pk).strip() != "": c_final = int(c_pk)
                         else: c_final = mapa_conflitos.get((int(c_erp), f_tela), None)
                         
