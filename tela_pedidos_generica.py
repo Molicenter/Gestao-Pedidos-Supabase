@@ -86,8 +86,7 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30], startrow=1)
         worksheet = writer.sheets[nome_aba[:30]]
 
-        # 🔥 CORES ATUALIZADAS (AZUL ESCURO 002060 COM TRACEJADO) 🔥
-        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid") # Azul Escuro
+        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
         fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         
         font_header = Font(color="FFFFFF", bold=True)
@@ -95,8 +94,7 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         
         border_thin = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'),
                              top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
-        
-        # Borda especial branca tracejada apenas para cabeçalhos
+                             
         border_header = Border(left=Side(style='dashed', color='FFFFFF'), right=Side(style='dashed', color='FFFFFF'),
                                top=Side(style='dashed', color='FFFFFF'), bottom=Side(style='dashed', color='FFFFFF'))
         
@@ -124,7 +122,6 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
             if "TOTAL" in col_name:
                 col_total_idx = col_num
 
-        # Aplicando estilo Tracejado Branco no Cabeçalho
         for col_num, cell in enumerate(worksheet[2], 1):
             cell.fill = fill_header
             cell.font = font_header
@@ -153,16 +150,11 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         for col_num, column_title in enumerate(df_export.columns, 1):
             letra = get_column_letter(col_num)
             col_name = str(column_title).upper()
-            if "FORNECEDOR" in col_name: 
-                worksheet.column_dimensions[letra].width = 18
-            elif "DESCRI" in col_name or "PRODUTO" in col_name: 
-                worksheet.column_dimensions[letra].width = 45
-            elif "CÓDIGO" in col_name: 
-                worksheet.column_dimensions[letra].width = 12
-            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: 
-                worksheet.column_dimensions[letra].width = 12
-            else: 
-                worksheet.column_dimensions[letra].width = 9 
+            if "FORNECEDOR" in col_name: worksheet.column_dimensions[letra].width = 18
+            elif "DESCRI" in col_name or "PRODUTO" in col_name: worksheet.column_dimensions[letra].width = 45
+            elif "CÓDIGO" in col_name: worksheet.column_dimensions[letra].width = 12
+            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: worksheet.column_dimensions[letra].width = 12
+            else: worksheet.column_dimensions[letra].width = 9 
 
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
@@ -184,7 +176,6 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         worksheet = writer.book.create_sheet(nome_aba[:30])
         writer.book.active = worksheet
         
-        # 🔥 CORES ATUALIZADAS (AZUL ESCURO 002060 COM TRACEJADO) 🔥
         fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
         fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         font_header = Font(color="FFFFFF", bold=True)
@@ -212,8 +203,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
 
         worksheet.column_dimensions['A'].width = 12  
         worksheet.column_dimensions['B'].width = 45  
-        for col_idx in range(3, 12): 
-            worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
+        for col_idx in range(3, 12): worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
 
         hoje_str = date.today().strftime("%d/%m/%Y")
         worksheet["A1"] = "Tipo"
@@ -238,9 +228,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
             worksheet.cell(row=current_row, column=1).value = ""
             worksheet.cell(row=current_row, column=2).value = forn
             
-            for i, loja in enumerate(lojas_cols): 
-                worksheet.cell(row=current_row, column=3+i).value = loja
-                
+            for i, loja in enumerate(lojas_cols): worksheet.cell(row=current_row, column=3+i).value = loja
             worksheet.cell(row=current_row, column=11).value = "TOTAL"
             
             for col_idx in range(1, 12):
@@ -268,8 +256,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
                     c_loja.alignment = align_center
                     c_loja.border = border_thin
                     c_loja.font = font_bold
-                    if i % 2 == 0: 
-                        c_loja.fill = fill_green
+                    if i % 2 == 0: c_loja.fill = fill_green
                 
                 c_total = worksheet.cell(row=current_row, column=11)
                 c_total.value = f'=IF(SUM(C{current_row}:J{current_row})>0, SUM(C{current_row}:J{current_row}), "")'
@@ -279,8 +266,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
                 c_total.fill = fill_green
                 current_row += 1
                 
-        if 'Sheet' in writer.book.sheetnames: 
-            writer.book.remove(writer.book['Sheet'])
+        if 'Sheet' in writer.book.sheetnames: writer.book.remove(writer.book['Sheet'])
 
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
@@ -337,10 +323,12 @@ def exibir_status_digitacao_lojas(df_pedidos_hoje):
     for i, loja_nome in enumerate(LOJAS_NOMES):
         with cols[i]:
             if loja_nome in lojas_que_digitam:
-                st.markdown(f"<div style='text-align:center; background-color:#d4edda; color:#155724; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>✅ OK</div>", unsafe_allow_html=True)
+                # 🔥 CLASSE NO-PRINT ADICIONADA DIRETAMENTE NA CAIXA 🔥
+                st.markdown(f"<div class='no-print' style='text-align:center; background-color:#d4edda; color:#155724; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>✅ OK</div>", unsafe_allow_html=True)
             else:
-                st.markdown(f"<div style='text-align:center; background-color:#f8d7da; color:#721c24; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>❌ Faltando</div>", unsafe_allow_html=True)
-    st.markdown("<br>", unsafe_allow_html=True)
+                # 🔥 CLASSE NO-PRINT ADICIONADA DIRETAMENTE NA CAIXA 🔥
+                st.markdown(f"<div class='no-print' style='text-align:center; background-color:#f8d7da; color:#721c24; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>❌ Faltando</div>", unsafe_allow_html=True)
+    st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
 
 def buscar_permissoes_setor(supabase_client, codigos_setor, num_loja=None):
     if not codigos_setor: 
@@ -380,9 +368,12 @@ def iniciar_tela(setor: str):
             .print-only { display: none !important; } 
         }
         
-        /* 🔥 CSS OTMIZADO PARA PREENCHIMENTO 100% NA IMPRESSÃO 🔥 */
+        /* 🔥 CSS OTMIZADO PARA COMPRESSÃO DE ESPAÇOS NA IMPRESSÃO 🔥 */
         @media print {
-            /* Oculta tudo que não é o relatório e zera seu espaço */
+            @page {
+                margin: 10mm; /* Força margens pequenas globais para puxar as tabelas pro topo */
+            }
+
             section[data-testid="stSidebar"], 
             div[data-testid="stSidebarNav"],
             header[data-testid="stHeader"], 
@@ -402,10 +393,21 @@ def iniciar_tela(setor: str):
                 display: none !important;
                 width: 0 !important;
                 height: 0 !important;
-                min-width: 0 !important;
+                min-height: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
             }
             
-            /* FORÇA O PREENCHIMENTO DO ESPAÇO DA ESQUERDA PARA 0 */
+            /* Tira TODAS as margens fantasmas dos containers invisíveis do Streamlit */
+            div[data-testid="stVerticalBlock"], 
+            div[data-testid="stVerticalBlockBorderWrapper"],
+            div[data-testid="stHorizontalBlock"] {
+                padding: 0 !important;
+                margin: 0 !important;
+                border: none !important;
+                gap: 0 !important;
+            }
+
             [data-testid="stMain"], .main {
                 margin-left: 0 !important;
                 padding-left: 0 !important;
@@ -413,7 +415,6 @@ def iniciar_tela(setor: str):
                 max-width: 100% !important;
             }
             
-            /* Zera margens gerais do body e containers filhos */
             html, body, .stApp, [data-testid="stAppViewContainer"], .block-container {
                 background-color: white !important;
                 margin: 0 !important;
@@ -431,10 +432,10 @@ def iniciar_tela(setor: str):
             .print-only h3 {
                 font-size: 12pt !important;
                 margin: 0 0 5px 0 !important;
+                padding-top: 0 !important;
                 color: black !important;
             }
             
-            /* Título do fornecedor grudado na tabela como um bloco contínuo */
             .print-only h4.supplier-header {
                 font-size: 9.5pt !important;
                 margin: 0 !important;
@@ -446,14 +447,13 @@ def iniciar_tela(setor: str):
                 text-align: left !important;
             }
             
-            /* Tabela ultra-comprimida */
             table.print-table {
                 width: 100% !important;
                 border-collapse: collapse;
                 font-family: Arial, sans-serif;
                 font-size: 8.5pt !important;
                 margin-top: 0 !important;
-                margin-bottom: 12px !important; 
+                margin-bottom: 6px !important; /* 🔥 Distância entre tabelas reduzida para o mínimo 🔥 */
                 page-break-inside: auto;
             }
             
@@ -468,6 +468,8 @@ def iniciar_tela(setor: str):
                 color: black !important;
                 line-height: 1.1 !important; 
                 text-align: center;
+                white-space: normal !important; /* Ajuda no modo paisagem */
+                word-wrap: break-word !important;
             }
             
             table.print-table th {
@@ -495,6 +497,16 @@ def iniciar_tela(setor: str):
             ])
         else:
             perfil_navegacao = "Visão das Lojas"
+
+    # 🔥 INJEÇÃO PARA MODO PAISAGEM (LANDSCAPE) APENAS NA SEPARAÇÃO E FECHAMENTO 🔥
+    if perfil_navegacao == "Separação e Fechamento":
+        st.markdown("""
+            <style>
+            @media print {
+                @page { size: landscape; margin: 10mm; }
+            }
+            </style>
+        """, unsafe_allow_html=True)
 
     if acesso_total:
         with st.sidebar:
@@ -643,7 +655,7 @@ def iniciar_tela(setor: str):
 
         df_consolidado["TOTAL_NUM"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
         col_filtro, col_metric = st.columns([3, 1])
         with col_filtro:
             opcoes_forn = ["Todos"] + sorted([str(f) for f in df_consolidado['fornecedor'].unique() if pd.notna(f) and str(f).strip() != ""])
@@ -916,7 +928,6 @@ def iniciar_tela(setor: str):
                     
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
-                # 🔥 INJEÇÃO OTIMIZADA DO HTML (COLADO NO FORNECEDOR) 🔥
                 html_table = df_forn_view.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
                 st.markdown(f'<div class="print-only" style="page-break-inside: avoid;"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
                 
@@ -927,7 +938,7 @@ def iniciar_tela(setor: str):
                 edit_df["fornecedor"] = forn
                 all_edited_frames.append(edit_df)
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
         
         if all_edited_frames:
             df_forn_editado_full = pd.concat(all_edited_frames, ignore_index=True)
@@ -1019,7 +1030,7 @@ def iniciar_tela(setor: str):
         html_table = df_cat_completo[cols_exibicao].drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
         st.markdown(f'<div class="print-only"><h3>🗂️ Catálogo Geral — {setor}</h3>{html_table}</div>', unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
         col_btn_salvar, col_btn_erp = st.columns(2)
         
         with col_btn_salvar: 
