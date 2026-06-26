@@ -87,7 +87,7 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         worksheet = writer.sheets[nome_aba[:30]]
 
         fill_header = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+        fill_green = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
         
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
@@ -177,7 +177,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         writer.book.active = worksheet
         
         fill_header = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+        fill_green = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
         font_normal = Font(bold=False)
