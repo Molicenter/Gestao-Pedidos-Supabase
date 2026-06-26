@@ -82,7 +82,6 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # ✅ Pula a linha 1 (startrow=1) para deixar espaço para o nosso título
         df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30], startrow=1)
         worksheet = writer.sheets[nome_aba[:30]]
 
@@ -98,7 +97,6 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-        # 📅 INSERINDO A DATA NO CABEÇALHO (LINHA 1)
         hoje_str = date.today().strftime("%d/%m/%Y")
         worksheet["A1"] = f"Pedidos do dia {hoje_str}"
         worksheet["A1"].font = font_bold
@@ -122,11 +120,9 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
             if "TOTAL" in col_name:
                 col_total_idx = col_num
 
-        # 🖌️ CABEÇALHO AZUL (AGORA NA LINHA 2)
         for col_num, cell in enumerate(worksheet[2], 1):
             cell.fill = fill_header; cell.font = font_header; cell.border = border_thin; cell.alignment = align_center
 
-        # 🖌️ LINHAS DE DADOS E CORES (AGORA COMEÇA NA LINHA 3)
         for row_num, row in enumerate(worksheet.iter_rows(min_row=3, max_row=worksheet.max_row, min_col=1, max_col=worksheet.max_column), 3):
             for cell in row:
                 cell.border = border_thin; cell.font = font_bold
@@ -139,7 +135,6 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
                 if cell.column in colunas_verdes:
                     cell.fill = fill_green
 
-        # 🧮 INJETANDO FÓRMULA EXCEL NA COLUNA DE TOTAL (TAMBÉM A PARTIR DA LINHA 3)
         if col_total_idx and cols_para_soma:
             letra_total = get_column_letter(col_total_idx)
             letra_primeira = get_column_letter(min(cols_para_soma))
@@ -147,7 +142,6 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
             for row_num in range(3, worksheet.max_row + 1):
                 worksheet[f"{letra_total}{row_num}"].value = f'=IF(SUM({letra_primeira}{row_num}:{letra_ultima}{row_num})>0, SUM({letra_primeira}{row_num}:{letra_ultima}{row_num}), "")'
 
-        # 📏 LARGURA DAS COLUNAS
         for col_num, column_title in enumerate(df_export.columns, 1):
             letra = get_column_letter(col_num)
             col_name = str(column_title).upper()
@@ -157,7 +151,6 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
             elif "MÉDIA" in col_name or "ESTOQUE" in col_name: worksheet.column_dimensions[letra].width = 12
             else: worksheet.column_dimensions[letra].width = 9 
 
-        # 🖨️ CONFIGURAÇÃO DE IMPRESSÃO
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
         worksheet.sheet_properties.pageSetUpPr.fitToPage = True
@@ -273,11 +266,6 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
 def injetar_botao_impressao():
     st.components.v1.html(
         """
-        <style>
-        @media print {
-            button { display: none !important; }
-        }
-        </style>
         <button onclick="window.print()" style="
             width: 100%;
             background-color: #f0f2f6;
@@ -295,7 +283,7 @@ def injetar_botao_impressao():
             box-sizing: border-box;
             height: 38px;
         ">
-            🖨️ Imprimir Tela
+            🖨️ Imprimir
         </button>
         """,
         height=42,
@@ -356,39 +344,43 @@ def iniciar_tela(setor: str):
             border-color: #d33333 !important;
         }
 
-        /* 🖨️ REGRAS EXCLUSIVAS PARA IMPRESSÃO DA TELA (CTRL+P) */
+        /* 🖨️ MODO IMPRESSÃO SUPER AGRESSIVO (Quebra o Blank Page do Streamlit) */
         @media print {
-            /* 1. Esconder Sidebar, Top Header e Botões nativos do Streamlit */
-            [data-testid="stSidebar"], 
-            header[data-testid="stHeader"], 
-            button[kind="primary"],
-            button[kind="secondary"] {
+            /* 1. Ocultar menus, botões nativos e cabeçalhos desnecessários */
+            header, [data-testid="stSidebar"], button, .stButton, [data-testid="stToolbar"] {
                 display: none !important;
             }
 
-            /* 2. Forçar a página a expandir e mostrar o conteúdo (tira o erro da página em branco) */
-            .stApp, .main, section[data-testid="stMain"] {
-                overflow: visible !important;
-                position: static !important;
-                background-color: white !important;
-            }
-            
-            .block-container {
-                overflow: visible !important;
+            /* 2. Destravar ABSOLUTAMENTE TODAS as caixas virtuais que cortam o conteúdo */
+            html, body, #root, .appview-container, .main, 
+            [data-testid="stApp"], [data-testid="stMain"], 
+            [data-testid="stMainBlockContainer"], .block-container {
+                position: relative !important;
+                display: block !important;
+                height: auto !important;
+                min-height: auto !important;
+                width: 100% !important;
                 max-width: 100% !important;
-                padding-top: 0 !important;
+                overflow: visible !important;
+                margin: 0 !important;
+                padding: 10px !important;
                 background-color: white !important;
             }
 
-            /* 3. Forçar letras pretas no modo geral */
-            h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown {
+            /* 3. Forçar texto preto em TUDO para o papel */
+            * {
                 color: black !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
             }
 
-            /* 4. Hack para o Data Editor (Canvas HTML5) não sair preto.
-               Isso inverte a cor de fundo (preto vira branco) automaticamente! */
+            /* 4. Inversão "Mágica" do Canvas do Data Editor (fundo preto vira branco) */
             canvas {
                 filter: invert(1) hue-rotate(180deg) brightness(1.2) !important;
+                display: block !important;
+                position: relative !important;
+                overflow: visible !important;
+                max-width: 100% !important;
             }
         }
         </style>
