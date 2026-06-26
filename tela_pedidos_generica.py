@@ -266,7 +266,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
 def injetar_botao_impressao():
     st.components.v1.html(
         """
-        <button onclick="window.parent.print()" style="
+        <button onclick="window.print()" style="
             width: 100%;
             background-color: #f0f2f6;
             color: #31333f;
@@ -329,43 +329,59 @@ def iniciar_tela(setor: str):
 
     st.markdown("""
         <style>
-        /* Estilização padrão da tela */
         div[data-testid="stComponentStack"] { width: 100% !important; }
+        div[data-testid="stTable"] td { text-align: center !important; }
         
-        /* 🖨️ CSS DEFINITIVO PARA IMPRESSÃO OTIMIZADA */
+        [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"],
+        [data-testid="stSidebar"] button[kind="primary"] {
+            background-color: #ff4b4b !important;
+            color: white !important;
+            border-color: #ff4b4b !important;
+        }
+        [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"]:hover,
+        [data-testid="stSidebar"] button[kind="primary"]:hover {
+            background-color: #d33333 !important;
+            border-color: #d33333 !important;
+        }
+
+        /* 🖨️ CSS DEFINITIVO PARA IMPRESSÃO STREAMLIT */
         @media print {
-            /* 1. Remove TUDO que não é o conteúdo principal */
-            [data-testid="stSidebar"], 
-            header, 
-            footer, 
-            .stButton, 
-            button, 
-            .viewerBadge_container__1QSob,
-            [data-testid="stToolbar"] {
+            /* 1. Esconde a Sidebar, botões e barras de ferramentas */
+            header, [data-testid="stSidebar"], [data-testid="stToolbar"], button, .stButton {
                 display: none !important;
             }
             
-            /* 2. Expande o container principal para ocupar a folha toda */
-            .block-container {
-                padding: 0 !important;
-                margin: 0 !important;
-                max-width: 100% !important;
-            }
-            
-            /* 3. Ajuste fino nas tabelas (removendo bordas de menu da tabela) */
-            [data-testid="stDataEditor"], [data-testid="stDataFrame"] {
-                width: 100% !important;
-                border: none !important;
-            }
-            
-            /* 4. Força o conteúdo a não quebrar de forma estranha */
+            /* 2. Destrava TODAS as "caixas" do Streamlit que cortam a tela */
+            html, body, #root, .stApp, [data-testid="stAppViewContainer"], 
+            [data-testid="stMain"], [data-testid="stMainBlockContainer"], .block-container,
             div[data-testid="stVerticalBlock"] {
+                height: auto !important;
+                min-height: 100% !important;
+                width: auto !important;
+                max-width: 100% !important;
+                overflow: visible !important;
+                position: relative !important;
                 display: block !important;
+                background-color: white !important;
+                margin: 0 !important;
+                padding: 0 !important;
             }
             
-            body, html {
-                width: 100% !important;
-                height: 100% !important;
+            /* 3. Força todos os textos a ficarem pretos */
+            * {
+                color: black !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            /* 4. Tira a limitação de altura da tabela e inverte a cor do Canvas */
+            [data-testid="stDataEditor"], [data-testid="stDataFrame"] {
+                height: auto !important;
+                overflow: visible !important;
+            }
+            canvas {
+                filter: invert(1) hue-rotate(180deg) brightness(1.1) !important;
+                display: block !important;
             }
         }
         </style>
