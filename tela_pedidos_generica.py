@@ -525,6 +525,17 @@ def iniciar_tela(setor: str):
             .print-fornecedores table.print-table td:nth-child(n+3) {
                 width: 6% !important;
             }
+            /* 🔥 AJUSTE — centraliza os pedidos digitados (Lojas/Total). 🔥
+               Sobrescreve a regra global que jogava as colunas 2/3/4 p/ a esquerda.
+               Só a coluna "Produto" (2ª) permanece alinhada à esquerda. */
+            .print-fornecedores table.print-table th,
+            .print-fornecedores table.print-table td {
+                text-align: center !important;
+            }
+            .print-fornecedores table.print-table th:nth-child(2),
+            .print-fornecedores table.print-table td:nth-child(2) {
+                text-align: left !important;
+            }
 
             /* 🔥 CORREÇÃO 3 — VISÃO DAS LOJAS: larguras fixas p/ não cortar "Qtde Pedida" 🔥 */
             /* table-layout: fixed faz o navegador respeitar as larguras abaixo (soma = 100%)
@@ -535,20 +546,29 @@ def iniciar_tela(setor: str):
                 font-size: 8pt !important;
             }
             .print-lojas table.print-table th:nth-child(1),
-            .print-lojas table.print-table td:nth-child(1) { width: 8%; }   /* Cód. ERP    */
+            .print-lojas table.print-table td:nth-child(1) { width: 7%; }   /* Cód. ERP    */
             .print-lojas table.print-table th:nth-child(2),
-            .print-lojas table.print-table td:nth-child(2) { width: 15%; }  /* Fornecedor  */
+            .print-lojas table.print-table td:nth-child(2) { width: 13%; }  /* Fornecedor  */
             .print-lojas table.print-table th:nth-child(3),
-            .print-lojas table.print-table td:nth-child(3) { width: 43%; }  /* Descrição   */
+            .print-lojas table.print-table td:nth-child(3) { width: 52%; }  /* Descrição   */
             .print-lojas table.print-table th:nth-child(4),
-            .print-lojas table.print-table td:nth-child(4) { width: 11%; }  /* Média (90d) */
+            .print-lojas table.print-table td:nth-child(4) { width: 9%; }   /* Média (90d) */
             .print-lojas table.print-table th:nth-child(5),
-            .print-lojas table.print-table td:nth-child(5) { width: 11%; }  /* Estoque ERP */
+            .print-lojas table.print-table td:nth-child(5) { width: 9%; }   /* Estoque ERP */
             .print-lojas table.print-table th:nth-child(6),
-            .print-lojas table.print-table td:nth-child(6) { width: 12%; }  /* Qtde Pedida */
+            .print-lojas table.print-table td:nth-child(6) { width: 10%; }  /* Qtde Pedida */
             .print-lojas table.print-table td {
                 word-break: break-word;
                 overflow-wrap: anywhere;
+            }
+            /* Números (Média/Estoque/Qtde) centralizados; Fornecedor/Descrição à esquerda */
+            .print-lojas table.print-table th:nth-child(4),
+            .print-lojas table.print-table td:nth-child(4),
+            .print-lojas table.print-table th:nth-child(5),
+            .print-lojas table.print-table td:nth-child(5),
+            .print-lojas table.print-table th:nth-child(6),
+            .print-lojas table.print-table td:nth-child(6) {
+                text-align: center !important;
             }
         }
         </style>
@@ -756,7 +776,10 @@ def iniciar_tela(setor: str):
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg)
         
-        html_table = df_exibicao.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
+        # 🔥 AJUSTE — troca as células que são exatamente "-" por vazio só na impressão.
+        # (replace com valor escalar casa a célula inteira; não mexe em nomes de produto)
+        df_print_sep = df_exibicao.drop(columns=['codigo'], errors='ignore').fillna('').replace("-", "")
+        html_table = df_print_sep.to_html(index=False, classes="print-table")
         st.markdown(f'<div class="print-only"><h3>📊 Separação e Fechamento — {setor} ({filtro_selecionado})</h3>{html_table}</div>', unsafe_allow_html=True)
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
