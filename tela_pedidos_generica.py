@@ -82,7 +82,8 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30])
+        # ✅ Pula a linha 1 (startrow=1) para deixar espaço para o nosso título
+        df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30], startrow=1)
         worksheet = writer.sheets[nome_aba[:30]]
 
         fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
@@ -96,6 +97,11 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         
         align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        # 📅 INSERINDO A DATA NO CABEÇALHO (LINHA 1)
+        hoje_str = date.today().strftime("%d/%m/%Y")
+        worksheet["A1"] = f"Pedidos do dia {hoje_str}"
+        worksheet["A1"].font = font_bold
 
         colunas_verdes = []
         col_total_idx = None
@@ -116,10 +122,12 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
             if "TOTAL" in col_name:
                 col_total_idx = col_num
 
-        for col_num, cell in enumerate(worksheet[1], 1):
+        # 🖌️ CABEÇALHO AZUL (AGORA NA LINHA 2)
+        for col_num, cell in enumerate(worksheet[2], 1):
             cell.fill = fill_header; cell.font = font_header; cell.border = border_thin; cell.alignment = align_center
 
-        for row_num, row in enumerate(worksheet.iter_rows(min_row=2, max_row=worksheet.max_row, min_col=1, max_col=worksheet.max_column), 2):
+        # 🖌️ LINHAS DE DADOS E CORES (AGORA COMEÇA NA LINHA 3)
+        for row_num, row in enumerate(worksheet.iter_rows(min_row=3, max_row=worksheet.max_row, min_col=1, max_col=worksheet.max_column), 3):
             for cell in row:
                 cell.border = border_thin; cell.font = font_bold
                 nome_col_atual = str(df_export.columns[cell.column - 1]).upper()
@@ -131,13 +139,15 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
                 if cell.column in colunas_verdes:
                     cell.fill = fill_green
 
+        # 🧮 INJETANDO FÓRMULA EXCEL NA COLUNA DE TOTAL (TAMBÉM A PARTIR DA LINHA 3)
         if col_total_idx and cols_para_soma:
             letra_total = get_column_letter(col_total_idx)
             letra_primeira = get_column_letter(min(cols_para_soma))
             letra_ultima = get_column_letter(max(cols_para_soma))
-            for row_num in range(2, worksheet.max_row + 1):
+            for row_num in range(3, worksheet.max_row + 1):
                 worksheet[f"{letra_total}{row_num}"].value = f'=IF(SUM({letra_primeira}{row_num}:{letra_ultima}{row_num})>0, SUM({letra_primeira}{row_num}:{letra_ultima}{row_num}), "")'
 
+        # 📏 LARGURA DAS COLUNAS
         for col_num, column_title in enumerate(df_export.columns, 1):
             letra = get_column_letter(col_num)
             col_name = str(column_title).upper()
@@ -147,6 +157,7 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
             elif "MÉDIA" in col_name or "ESTOQUE" in col_name: worksheet.column_dimensions[letra].width = 12
             else: worksheet.column_dimensions[letra].width = 9 
 
+        # 🖨️ CONFIGURAÇÃO DE IMPRESSÃO
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
         worksheet.sheet_properties.pageSetUpPr.fitToPage = True
@@ -379,7 +390,6 @@ def iniciar_tela(setor: str):
                         if df_prod_map.empty:
                             st.warning("Nenhum produto cadastrado neste setor para atualizar as médias.")
                         else:
-                            # ✅ FIX: Renomeando a coluna de PK para evitar colisão/KeyError com o merge do ERP
                             df_prod_map = df_prod_map.rename(columns={'codigo': 'codigo_pk_interna'})
                             
                             if 'codigo_erp' not in df_prod_map.columns: df_prod_map['codigo_erp'] = df_prod_map['codigo_pk_interna']
@@ -744,7 +754,6 @@ def iniciar_tela(setor: str):
                     if l not in edit_df.columns:
                         edit_df[l] = "-"
                 
-                # ✅ INSERÇÃO: Alimenta o Fornecedor no DataFrame para remontagem estrutural no openpyxl
                 edit_df["fornecedor"] = forn
                 all_edited_frames.append(edit_df)
 
@@ -756,7 +765,6 @@ def iniciar_tela(setor: str):
             with c_salvar: btn_salvar_forn = st.button("💾 Salvar Ajustes do Resumo", type="primary", use_container_width=True)
             with c_excel:
                 df_export = df_forn_editado_full.drop(columns=['codigo'], errors='ignore')
-                # ✅ MUDANÇA: Chama o gerador específico bandeirado por fornecedores
                 st.download_button("📊 Exportar Fornecedores", data=gerar_excel_fornecedores(df_export, f"Fornecedores"), file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
             with c_print: injetar_botao_impressao()
 
