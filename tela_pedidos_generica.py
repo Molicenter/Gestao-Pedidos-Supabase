@@ -150,11 +150,16 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         for col_num, column_title in enumerate(df_export.columns, 1):
             letra = get_column_letter(col_num)
             col_name = str(column_title).upper()
-            if "FORNECEDOR" in col_name: worksheet.column_dimensions[letra].width = 18
-            elif "DESCRI" in col_name or "PRODUTO" in col_name: worksheet.column_dimensions[letra].width = 45
-            elif "CÓDIGO" in col_name: worksheet.column_dimensions[letra].width = 12
-            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: worksheet.column_dimensions[letra].width = 12
-            else: worksheet.column_dimensions[letra].width = 9 
+            if "FORNECEDOR" in col_name: 
+                worksheet.column_dimensions[letra].width = 18
+            elif "DESCRI" in col_name or "PRODUTO" in col_name: 
+                worksheet.column_dimensions[letra].width = 45
+            elif "CÓDIGO" in col_name: 
+                worksheet.column_dimensions[letra].width = 12
+            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: 
+                worksheet.column_dimensions[letra].width = 12
+            else: 
+                worksheet.column_dimensions[letra].width = 9 
 
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
@@ -203,7 +208,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
 
         worksheet.column_dimensions['A'].width = 12  
         worksheet.column_dimensions['B'].width = 45  
-        for col_idx in range(3, 12): worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
+        for col_idx in range(3, 12): 
+            worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
 
         hoje_str = date.today().strftime("%d/%m/%Y")
         worksheet["A1"] = "Tipo"
@@ -228,7 +234,9 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
             worksheet.cell(row=current_row, column=1).value = ""
             worksheet.cell(row=current_row, column=2).value = forn
             
-            for i, loja in enumerate(lojas_cols): worksheet.cell(row=current_row, column=3+i).value = loja
+            for i, loja in enumerate(lojas_cols): 
+                worksheet.cell(row=current_row, column=3+i).value = loja
+                
             worksheet.cell(row=current_row, column=11).value = "TOTAL"
             
             for col_idx in range(1, 12):
@@ -256,7 +264,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
                     c_loja.alignment = align_center
                     c_loja.border = border_thin
                     c_loja.font = font_bold
-                    if i % 2 == 0: c_loja.fill = fill_green
+                    if i % 2 == 0: 
+                        c_loja.fill = fill_green
                 
                 c_total = worksheet.cell(row=current_row, column=11)
                 c_total.value = f'=IF(SUM(C{current_row}:J{current_row})>0, SUM(C{current_row}:J{current_row}), "")'
@@ -266,7 +275,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
                 c_total.fill = fill_green
                 current_row += 1
                 
-        if 'Sheet' in writer.book.sheetnames: writer.book.remove(writer.book['Sheet'])
+        if 'Sheet' in writer.book.sheetnames: 
+            writer.book.remove(writer.book['Sheet'])
 
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
@@ -323,10 +333,8 @@ def exibir_status_digitacao_lojas(df_pedidos_hoje):
     for i, loja_nome in enumerate(LOJAS_NOMES):
         with cols[i]:
             if loja_nome in lojas_que_digitam:
-                # 🔥 CLASSE NO-PRINT ADICIONADA DIRETAMENTE NA CAIXA 🔥
                 st.markdown(f"<div class='no-print' style='text-align:center; background-color:#d4edda; color:#155724; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>✅ OK</div>", unsafe_allow_html=True)
             else:
-                # 🔥 CLASSE NO-PRINT ADICIONADA DIRETAMENTE NA CAIXA 🔥
                 st.markdown(f"<div class='no-print' style='text-align:center; background-color:#f8d7da; color:#721c24; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>❌ Faltando</div>", unsafe_allow_html=True)
     st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
 
@@ -368,12 +376,13 @@ def iniciar_tela(setor: str):
             .print-only { display: none !important; } 
         }
         
-        /* 🔥 CSS OTMIZADO PARA COMPRESSÃO DE ESPAÇOS NA IMPRESSÃO 🔥 */
+        /* 🔥 CSS OTMIZADO PARA PREENCHIMENTO 100% NA IMPRESSÃO 🔥 */
         @media print {
             @page {
-                margin: 10mm; /* Força margens pequenas globais para puxar as tabelas pro topo */
+                margin: 10mm;
             }
 
+            /* Oculta tudo que não é o relatório e zera seu espaço */
             section[data-testid="stSidebar"], 
             div[data-testid="stSidebarNav"],
             header[data-testid="stHeader"], 
@@ -385,7 +394,7 @@ def iniciar_tela(setor: str):
             [data-testid="stSelectbox"], 
             [data-testid="stTextInput"], 
             [data-testid="stAlert"],
-            [data-testid="column"],
+            [data-testid="stHorizontalBlock"], /* Esconde as colunas de filtros/botões de cima */
             h1, h2, h5, h6, 
             [data-testid="stDataEditor"], 
             [data-testid="stDataFrame"],
@@ -393,28 +402,35 @@ def iniciar_tela(setor: str):
                 display: none !important;
                 width: 0 !important;
                 height: 0 !important;
-                min-height: 0 !important;
+                min-width: 0 !important;
                 margin: 0 !important;
                 padding: 0 !important;
             }
             
-            /* Tira TODAS as margens fantasmas dos containers invisíveis do Streamlit */
-            div[data-testid="stVerticalBlock"], 
-            div[data-testid="stVerticalBlockBorderWrapper"],
-            div[data-testid="stHorizontalBlock"] {
+            /* Remove os preenchimentos/bordas invisíveis dos st.container */
+            [data-testid="stVerticalBlockBorderWrapper"] {
+                border: none !important;
                 padding: 0 !important;
                 margin: 0 !important;
-                border: none !important;
+            }
+            div[data-testid="stVerticalBlock"], .element-container {
                 gap: 0 !important;
+                margin-bottom: 0 !important;
+                padding-bottom: 0 !important;
             }
 
+            /* FORÇA O PREENCHIMENTO DO ESPAÇO DA ESQUERDA PARA 0 */
             [data-testid="stMain"], .main {
-                margin-left: 0 !important;
-                padding-left: 0 !important;
-                width: 100% !important;
-                max-width: 100% !important;
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100vw !important;
+                max-width: 100vw !important;
             }
             
+            /* Zera margens gerais do body e containers filhos */
             html, body, .stApp, [data-testid="stAppViewContainer"], .block-container {
                 background-color: white !important;
                 margin: 0 !important;
@@ -431,15 +447,15 @@ def iniciar_tela(setor: str):
             
             .print-only h3 {
                 font-size: 12pt !important;
-                margin: 0 0 5px 0 !important;
-                padding-top: 0 !important;
+                margin: 0 0 10px 0 !important;
                 color: black !important;
             }
             
+            /* Título do fornecedor grudado na tabela como um bloco contínuo */
             .print-only h4.supplier-header {
                 font-size: 9.5pt !important;
                 margin: 0 !important;
-                padding: 4px 6px !important;
+                padding: 6px 8px !important;
                 background-color: #e0e0e0 !important;
                 border: 1px solid black !important;
                 border-bottom: none !important;
@@ -447,13 +463,14 @@ def iniciar_tela(setor: str):
                 text-align: left !important;
             }
             
+            /* Tabela ultra-comprimida */
             table.print-table {
                 width: 100% !important;
                 border-collapse: collapse;
                 font-family: Arial, sans-serif;
                 font-size: 8.5pt !important;
                 margin-top: 0 !important;
-                margin-bottom: 6px !important; /* 🔥 Distância entre tabelas reduzida para o mínimo 🔥 */
+                margin-bottom: 20px !important; /* 🔥 Aumentado o espaço entre fornecedores para não sobrepor 🔥 */
                 page-break-inside: auto;
             }
             
@@ -464,12 +481,10 @@ def iniciar_tela(setor: str):
             
             table.print-table th, table.print-table td {
                 border: 1px solid black !important;
-                padding: 2px 4px !important; 
+                padding: 4px 6px !important; 
                 color: black !important;
                 line-height: 1.1 !important; 
                 text-align: center;
-                white-space: normal !important; /* Ajuda no modo paisagem */
-                word-wrap: break-word !important;
             }
             
             table.print-table th {
