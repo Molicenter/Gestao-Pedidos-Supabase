@@ -150,11 +150,16 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         for col_num, column_title in enumerate(df_export.columns, 1):
             letra = get_column_letter(col_num)
             col_name = str(column_title).upper()
-            if "FORNECEDOR" in col_name: worksheet.column_dimensions[letra].width = 18
-            elif "DESCRI" in col_name or "PRODUTO" in col_name: worksheet.column_dimensions[letra].width = 45
-            elif "CÓDIGO" in col_name: worksheet.column_dimensions[letra].width = 12
-            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: worksheet.column_dimensions[letra].width = 12
-            else: worksheet.column_dimensions[letra].width = 9 
+            if "FORNECEDOR" in col_name: 
+                worksheet.column_dimensions[letra].width = 18
+            elif "DESCRI" in col_name or "PRODUTO" in col_name: 
+                worksheet.column_dimensions[letra].width = 45
+            elif "CÓDIGO" in col_name: 
+                worksheet.column_dimensions[letra].width = 12
+            elif "MÉDIA" in col_name or "ESTOQUE" in col_name: 
+                worksheet.column_dimensions[letra].width = 12
+            else: 
+                worksheet.column_dimensions[letra].width = 9 
 
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
@@ -371,17 +376,16 @@ def iniciar_tela(setor: str):
             .print-only { display: none !important; } 
         }
         
-        /* 🔥 CSS OTMIZADO PARA IMPRESSÃO PERFEITA 🔥 */
+        /* 🔥 CSS OTMIZADO PARA PREENCHIMENTO 100% NA IMPRESSÃO 🔥 */
         @media print {
             @page {
                 margin: 10mm;
             }
 
-            /* 1. Oculta absolutamente tudo que não é o relatório */
+            /* Oculta tudo que não é o relatório e zera seu espaço */
             section[data-testid="stSidebar"], 
             div[data-testid="stSidebarNav"],
             header[data-testid="stHeader"], 
-            header,
             footer, 
             [data-testid="stToolbar"],
             button, .stButton, 
@@ -390,15 +394,20 @@ def iniciar_tela(setor: str):
             [data-testid="stSelectbox"], 
             [data-testid="stTextInput"], 
             [data-testid="stAlert"],
-            [data-testid="stHorizontalBlock"], 
+            [data-testid="stHorizontalBlock"], /* Esconde as colunas de filtros/botões de cima */
             h1, h2, h5, h6, 
             [data-testid="stDataEditor"], 
             [data-testid="stDataFrame"],
             .no-print {
                 display: none !important;
+                width: 0 !important;
+                height: 0 !important;
+                min-width: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
             }
             
-            /* 2. Zera margens "fantasmas" que empurravam a tela pra baixo */
+            /* Remove os preenchimentos/bordas invisíveis dos st.container */
             [data-testid="stVerticalBlockBorderWrapper"] {
                 border: none !important;
                 padding: 0 !important;
@@ -406,14 +415,23 @@ def iniciar_tela(setor: str):
             }
             div[data-testid="stVerticalBlock"], .element-container {
                 gap: 0 !important;
-                margin: 0 !important;
-                padding: 0 !important;
+                margin-bottom: 0 !important;
+                padding-bottom: 0 !important;
             }
 
-            /* 3. RESTAURA O FLUXO DA PÁGINA: Acaba com a sobreposição de tabelas */
-            html, body, #root, .stApp, [data-testid="stAppViewContainer"], 
-            [data-testid="stMain"], [data-testid="stMainBlockContainer"], .block-container, .main {
-                position: static !important; /* FLUXO NORMAL PARA NÃO SOBREPOR */
+            /* FORÇA O PREENCHIMENTO DO ESPAÇO DA ESQUERDA PARA 0 */
+            [data-testid="stMain"], .main {
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100vw !important;
+                max-width: 100vw !important;
+            }
+            
+            /* Zera margens gerais do body e containers filhos */
+            html, body, .stApp, [data-testid="stAppViewContainer"], .block-container {
                 background-color: white !important;
                 margin: 0 !important;
                 padding: 0 !important;
@@ -425,27 +443,24 @@ def iniciar_tela(setor: str):
             .print-only {
                 display: block !important;
                 width: 100% !important;
-                margin: 0 !important;
-                padding: 0 !important;
             }
             
             .print-only h3 {
                 font-size: 12pt !important;
                 margin: 0 0 10px 0 !important;
-                padding-top: 0 !important;
                 color: black !important;
             }
             
+            /* Título do fornecedor grudado na tabela como um bloco contínuo */
             .print-only h4.supplier-header {
-                font-size: 9pt !important;
+                font-size: 9.5pt !important;
                 margin: 0 !important;
-                padding: 4px 6px !important;
+                padding: 6px 8px !important;
                 background-color: #e0e0e0 !important;
                 border: 1px solid black !important;
                 border-bottom: none !important;
                 color: black !important;
                 text-align: left !important;
-                page-break-after: avoid !important;
             }
             
             /* Tabela ultra-comprimida */
@@ -453,9 +468,9 @@ def iniciar_tela(setor: str):
                 width: 100% !important;
                 border-collapse: collapse;
                 font-family: Arial, sans-serif;
-                font-size: 7.5pt !important; /* 🔥 FONTE REDUZIDA PARA CABER TUDO 🔥 */
+                font-size: 8.5pt !important;
                 margin-top: 0 !important;
-                margin-bottom: 25px !important; /* Espaço seguro entre fornecedores */
+                margin-bottom: 20px !important; /* 🔥 Aumentado o espaço entre fornecedores para não sobrepor 🔥 */
                 page-break-inside: auto;
             }
             
@@ -466,18 +481,15 @@ def iniciar_tela(setor: str):
             
             table.print-table th, table.print-table td {
                 border: 1px solid black !important;
-                padding: 2px 3px !important; /* PADDING MÍNIMO */
+                padding: 4px 6px !important; 
                 color: black !important;
-                line-height: 1.0 !important; 
+                line-height: 1.1 !important; 
                 text-align: center;
-                white-space: normal !important; 
-                word-wrap: break-word !important;
             }
             
             table.print-table th {
                 background-color: #f0f2f6 !important;
                 font-weight: bold;
-                font-size: 8pt !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
@@ -931,9 +943,8 @@ def iniciar_tela(setor: str):
                     
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
-                # 🔥 INJEÇÃO OTIMIZADA DO HTML (COLADO NO FORNECEDOR COM PAGE BREAK LIBERADO) 🔥
                 html_table = df_forn_view.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
-                st.markdown(f'<div class="print-only"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="print-only" style="page-break-inside: avoid;"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
                 
                 for l in LOJAS_NOMES:
                     if l not in edit_df.columns: 
