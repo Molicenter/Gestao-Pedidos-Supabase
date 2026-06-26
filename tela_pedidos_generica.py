@@ -953,7 +953,7 @@ def iniciar_tela(setor: str):
     # ─────────────────────────────────────────────────────────────────────────
     elif perfil_navegacao == "Visão Fornecedores (Resumo)":
         st.markdown(f"<div class='no-print'><h2>🚚 Resumo Consolidado por Fornecedor — {setor}</h2></div>", unsafe_allow_html=True)
-        st.markdown(f'<div class="print-only"><div class="print-datetime">Resumo por Fornecedor — {setor} &nbsp;|&nbsp; Emitido em {data_hora_brasilia()}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only"><h3>🚚 Resumo por Fornecedor — {setor}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div></div>', unsafe_allow_html=True)
         
         resp_prod = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor).execute()
         resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(date.today())).execute()
