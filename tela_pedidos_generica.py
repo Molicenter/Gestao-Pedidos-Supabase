@@ -420,24 +420,26 @@ def iniciar_tela(setor: str):
             }
 
             /* FORÇA O PREENCHIMENTO DO ESPAÇO DA ESQUERDA PARA 0 */
-            [data-testid="stMain"], .main {
-                position: absolute !important;
-                top: 0 !important;
-                left: 0 !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                width: 100vw !important;
-                max-width: 100vw !important;
-            }
-            
-            /* Zera margens gerais do body e containers filhos */
-            html, body, .stApp, [data-testid="stAppViewContainer"], .block-container {
+            /* DEPOIS */
+            [data-testid="stMain"], .main,
+            html, body, .stApp, 
+            [data-testid="stAppViewContainer"],
+            [data-testid="stAppViewBlockContainer"],
+            .block-container {
                 background-color: white !important;
+                position: static !important;
                 margin: 0 !important;
                 padding: 0 !important;
-                max-width: 100% !important;
                 width: 100% !important;
+                max-width: 100% !important;
                 overflow: visible !important;
+            }
+
+            /* Puxa agressivamente o conteúdo pro topo */
+            [data-testid="stMain"] > div:first-child,
+            [data-testid="stAppViewBlockContainer"] > div:first-child {
+                margin-top: -80px !important;
+                padding-top: 0 !important;
             }
             
             .print-only {
@@ -944,7 +946,7 @@ def iniciar_tela(setor: str):
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
                 html_table = df_forn_view.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
-                st.markdown(f'<div class="print-only" style="page-break-inside: avoid;"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="print-only"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
                 
                 for l in LOJAS_NOMES:
                     if l not in edit_df.columns: 
