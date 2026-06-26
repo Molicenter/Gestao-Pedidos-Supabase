@@ -86,8 +86,8 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30], startrow=1)
         worksheet = writer.sheets[nome_aba[:30]]
 
-        fill_header = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        fill_green = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
+        fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
@@ -176,8 +176,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         worksheet = writer.book.create_sheet(nome_aba[:30])
         writer.book.active = worksheet
         
-        fill_header = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        fill_green = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
+        fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
         font_normal = Font(bold=False)
@@ -366,18 +366,52 @@ def iniciar_tela(setor: str):
             .print-only { display: none !important; } 
         }
         
-        /* 🔥 CSS OTMIZADO E DEFINITIVO PARA IMPRESSÃO 🔥 */
+        /* 🔥 CSS FINAL OTIMIZADO (SEM GAMBIARRAS) 🔥 */
         @media print {
             @page {
                 margin: 10mm;
             }
 
-            /* 1. MATA A NAVEGAÇÃO E BARRAS EXTRAS SEM USAR POSITION ABSOLUTE */
-            section[data-testid="stSidebar"], 
-            div[data-testid="stSidebarNav"],
-            header[data-testid="stHeader"], 
-            footer, 
-            [data-testid="stToolbar"],
+            /* 1. MATA A SIDEBAR E MENU DE FORMA LIMPA (Ataca a tag principal independente da versão) */
+            [data-testid="stSidebar"], 
+            [data-testid="stSidebarNav"],
+            [data-testid="stSidebarContent"],
+            .sidebar {
+                display: none !important;
+                width: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+
+            /* 2. ZERA MARGENS DO CONTEÚDO PRINCIPAL (Mata o espaço em branco na esquerda e no topo) */
+            [data-testid="stMain"],
+            .main {
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+            }
+
+            .block-container, 
+            [data-testid="stMainBlockContainer"],
+            [data-testid="stAppViewContainer"] {
+                padding: 0 !important;
+                margin: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            
+            /* Remove fundos falsos e espaçamentos internos ocultos */
+            div[data-testid="stVerticalBlockBorderWrapper"],
+            div[data-testid="stVerticalBlock"],
+            .element-container {
+                border: none !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                gap: 0 !important;
+            }
+
+            /* 3. ESCONDE TODOS OS BOTÕES E WIDGETS */
+            header, footer, [data-testid="stToolbar"],
             button, .stButton, 
             [data-testid="stMetric"], 
             [data-testid="stRadio"], 
@@ -392,51 +426,26 @@ def iniciar_tela(setor: str):
                 display: none !important;
             }
             
-            /* 2. DESTRAVA CONTAINERS E MANTÉM FLUXO NATURAL (Impede a sobreposição) */
-            html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], .main {
+            /* 4. GARANTE FUNDO BRANCO NA PÁGINA TODA */
+            html, body, .stApp {
                 background-color: white !important;
-                display: block !important; 
-                margin: 0 !important;
-                padding: 0 !important;
-                width: 100% !important;
-                max-width: 100% !important;
             }
 
-            /* 3. PUXA A TABELA PARA MATAR O BURACO BRANCO COM MARGENS NEGATIVAS */
-            .block-container {
-                padding-top: 0 !important;
-                padding-left: 0 !important;
-                padding-right: 0 !important;
-                margin-top: -60px !important; /* Puxa para o topo */
-                margin-left: -40px !important; /* Puxa para a esquerda */
-                width: 100% !important;
-                max-width: 100% !important;
-            }
-            
-            /* Limpa os espaços fantasmas do Streamlit */
-            [data-testid="stVerticalBlockBorderWrapper"],
-            div[data-testid="stVerticalBlock"],
-            .element-container {
-                border: none !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                gap: 0 !important;
-            }
-
+            /* 5. MOSTRA APENAS A NOSSA TABELA, FLUIDA E NORMAL */
             .print-only {
                 display: block !important;
                 width: 100% !important;
             }
             
             .print-only h3 {
-                font-size: 14pt !important;
+                font-size: 13pt !important;
                 margin: 0 0 10px 0 !important;
+                padding-top: 0 !important;
                 color: black !important;
             }
             
-            /* Título do fornecedor (agora não sobrepõe porque tiramos page-break-inside avoid do container) */
             .print-only h4.supplier-header {
-                font-size: 10pt !important;
+                font-size: 9.5pt !important;
                 margin: 0 !important;
                 padding: 4px 6px !important;
                 background-color: #e0e0e0 !important;
@@ -444,16 +453,17 @@ def iniciar_tela(setor: str):
                 border-bottom: none !important;
                 color: black !important;
                 text-align: left !important;
+                page-break-after: avoid !important;
             }
             
-            /* 4. TABELA BEM ESPAÇADA E FONTE REDUZIDA */
+            /* Tabela Ajustada para evitar texto picotado */
             table.print-table {
                 width: 100% !important;
                 border-collapse: collapse;
                 font-family: Arial, sans-serif;
-                font-size: 8pt !important; 
+                font-size: 8pt !important; /* Fonte ligeiramente menor */
                 margin-top: 0 !important;
-                margin-bottom: 25px !important; /* Espaço seguro e largo entre fornecedores */
+                margin-bottom: 20px !important; /* Espaço entre fornecedores */
                 page-break-inside: auto;
             }
             
@@ -468,7 +478,7 @@ def iniciar_tela(setor: str):
                 color: black !important;
                 line-height: 1.1 !important; 
                 text-align: center;
-                word-wrap: break-word !important;
+                word-wrap: break-word !important; /* Permite quebrar se precisar */
             }
             
             table.print-table th {
@@ -927,7 +937,6 @@ def iniciar_tela(setor: str):
                     
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
-                # 🔥 INJEÇÃO DO HTML MUDADA (SEM 'PAGE-BREAK-INSIDE AVOID' NO CONTAINER PAI PARA NÃO SOBREPOR) 🔥
                 html_table = df_forn_view.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
                 st.markdown(f'<div class="print-only"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
                 
