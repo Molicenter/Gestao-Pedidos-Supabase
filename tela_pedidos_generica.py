@@ -406,6 +406,16 @@ def iniciar_tela(setor: str):
                 margin: 0 !important;
                 padding: 0 !important;
             }
+
+            /* 🔥 CORREÇÃO 1 — ELIMINA O ESPAÇO EM BRANCO NO TOPO 🔥 */
+            /* Esconde QUALQUER bloco de elemento do Streamlit que NÃO contenha a área
+               de impressão (.print-only). Assim o relatório "sobe" sozinho para o topo
+               da folha, independente de quantos data_editors/métricas/filtros existam
+               acima dele. Continua paginando normalmente (não usa position absolute). */
+            [data-testid="stMain"] [data-testid="stElementContainer"]:not(:has(.print-only)),
+            [data-testid="stMain"] .element-container:not(:has(.print-only)) {
+                display: none !important;
+            }
             
             /* Remove os preenchimentos/bordas invisíveis dos st.container */
             [data-testid="stVerticalBlockBorderWrapper"] {
@@ -498,6 +508,47 @@ def iniciar_tela(setor: str):
             
             table.print-table td:nth-child(2), table.print-table td:nth-child(3), table.print-table td:nth-child(4) {
                 text-align: left;
+            }
+
+            /* 🔥 CORREÇÃO 2 — VISÃO FORNECEDORES: fonte/padding menores p/ nomes não quebrarem 🔥 */
+            /* (ex.: "Alface Hidrop Fukunaga Crespa Un" deixava de quebrar p/ a linha de baixo) */
+            .print-fornecedores table.print-table {
+                font-size: 7pt !important;
+            }
+            .print-fornecedores table.print-table th,
+            .print-fornecedores table.print-table td {
+                padding: 2px 4px !important;
+                line-height: 1.05 !important;
+            }
+            /* As colunas de Loja/Total ficam estreitas → sobra largura p/ a coluna Produto */
+            .print-fornecedores table.print-table th:nth-child(n+3),
+            .print-fornecedores table.print-table td:nth-child(n+3) {
+                width: 6% !important;
+            }
+
+            /* 🔥 CORREÇÃO 3 — VISÃO DAS LOJAS: larguras fixas p/ não cortar "Qtde Pedida" 🔥 */
+            /* table-layout: fixed faz o navegador respeitar as larguras abaixo (soma = 100%)
+               e quebrar a Descrição em 2 linhas em vez de empurrar a última coluna p/ fora. */
+            .print-lojas table.print-table {
+                table-layout: fixed !important;
+                width: 100% !important;
+                font-size: 8pt !important;
+            }
+            .print-lojas table.print-table th:nth-child(1),
+            .print-lojas table.print-table td:nth-child(1) { width: 8%; }   /* Cód. ERP    */
+            .print-lojas table.print-table th:nth-child(2),
+            .print-lojas table.print-table td:nth-child(2) { width: 15%; }  /* Fornecedor  */
+            .print-lojas table.print-table th:nth-child(3),
+            .print-lojas table.print-table td:nth-child(3) { width: 43%; }  /* Descrição   */
+            .print-lojas table.print-table th:nth-child(4),
+            .print-lojas table.print-table td:nth-child(4) { width: 11%; }  /* Média (90d) */
+            .print-lojas table.print-table th:nth-child(5),
+            .print-lojas table.print-table td:nth-child(5) { width: 11%; }  /* Estoque ERP */
+            .print-lojas table.print-table th:nth-child(6),
+            .print-lojas table.print-table td:nth-child(6) { width: 12%; }  /* Qtde Pedida */
+            .print-lojas table.print-table td {
+                word-break: break-word;
+                overflow-wrap: anywhere;
             }
         }
         </style>
@@ -831,7 +882,7 @@ def iniciar_tela(setor: str):
         grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=True, key=f"grid_loja_{num_loja}")
 
         html_table = df_filtrado.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
-        st.markdown(f'<div class="print-only"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3>{html_table}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3>{html_table}</div>', unsafe_allow_html=True)
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
         with c_salvar: 
@@ -946,7 +997,7 @@ def iniciar_tela(setor: str):
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
                 html_table = df_forn_view.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
-                st.markdown(f'<div class="print-only"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="print-only print-fornecedores"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
                 
                 for l in LOJAS_NOMES:
                     if l not in edit_df.columns: 
