@@ -86,8 +86,8 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30], startrow=1)
         worksheet = writer.sheets[nome_aba[:30]]
 
-        # 🔥 CORES E BORDAS ATUALIZADAS (AZUL AMENO E TRACEJADO BRANCO) 🔥
-        fill_header = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid") # Azul mais suave
+        # 🔥 CORES ATUALIZADAS (AZUL ESCURO 002060 COM TRACEJADO) 🔥
+        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid") # Azul Escuro
         fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         
         font_header = Font(color="FFFFFF", bold=True)
@@ -184,8 +184,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         worksheet = writer.book.create_sheet(nome_aba[:30])
         writer.book.active = worksheet
         
-        # 🔥 CORES E BORDAS ATUALIZADAS 🔥
-        fill_header = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        # 🔥 CORES ATUALIZADAS (AZUL ESCURO 002060 COM TRACEJADO) 🔥
+        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
         fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
@@ -380,9 +380,11 @@ def iniciar_tela(setor: str):
             .print-only { display: none !important; } 
         }
         
-        /* 🔥 CSS OTMIZADO PARA COMPRESSÃO DE ESPAÇOS NA IMPRESSÃO 🔥 */
+        /* 🔥 CSS OTMIZADO PARA PREENCHIMENTO 100% NA IMPRESSÃO 🔥 */
         @media print {
+            /* Oculta tudo que não é o relatório e zera seu espaço */
             section[data-testid="stSidebar"], 
+            div[data-testid="stSidebarNav"],
             header[data-testid="stHeader"], 
             footer, 
             [data-testid="stToolbar"],
@@ -400,9 +402,19 @@ def iniciar_tela(setor: str):
                 display: none !important;
                 width: 0 !important;
                 height: 0 !important;
+                min-width: 0 !important;
             }
             
-            html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], .block-container {
+            /* FORÇA O PREENCHIMENTO DO ESPAÇO DA ESQUERDA PARA 0 */
+            [data-testid="stMain"], .main {
+                margin-left: 0 !important;
+                padding-left: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            
+            /* Zera margens gerais do body e containers filhos */
+            html, body, .stApp, [data-testid="stAppViewContainer"], .block-container {
                 background-color: white !important;
                 margin: 0 !important;
                 padding: 0 !important;
@@ -413,6 +425,7 @@ def iniciar_tela(setor: str):
             
             .print-only {
                 display: block !important;
+                width: 100% !important;
             }
             
             .print-only h3 {
@@ -435,12 +448,12 @@ def iniciar_tela(setor: str):
             
             /* Tabela ultra-comprimida */
             table.print-table {
-                width: 100%;
+                width: 100% !important;
                 border-collapse: collapse;
                 font-family: Arial, sans-serif;
-                font-size: 8.5pt !important; /* Fonte pequena para caber mais */
+                font-size: 8.5pt !important;
                 margin-top: 0 !important;
-                margin-bottom: 12px !important; /* Espaço mínimo entre fornecedores */
+                margin-bottom: 12px !important; 
                 page-break-inside: auto;
             }
             
@@ -451,9 +464,9 @@ def iniciar_tela(setor: str):
             
             table.print-table th, table.print-table td {
                 border: 1px solid black !important;
-                padding: 2px 4px !important; /* Redução drástica de padding */
+                padding: 2px 4px !important; 
                 color: black !important;
-                line-height: 1.1 !important; /* Texto mais junto */
+                line-height: 1.1 !important; 
                 text-align: center;
             }
             
