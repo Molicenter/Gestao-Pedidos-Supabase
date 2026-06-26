@@ -63,7 +63,7 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         "Estoque ERP": "Estoque"
     })
 
-    # 2. LIMPANDO OS DADOS PARA O EXCEL (Convertendo textos para números e ocultando 0 e '-')
+    # 2. LIMPANDO OS DADOS PARA O EXCEL
     def limpar_valor_excel(v):
         if pd.isna(v): return None
         v_str = str(v).strip()
@@ -73,9 +73,8 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
             if f == 0: return None
             return int(f) if f.is_integer() else f
         except ValueError:
-            return v # Retorna o original se não for número
+            return v 
 
-    # Aplica a limpeza apenas nas colunas numéricas/lojas
     for col in df_export.columns:
         col_upper = str(col).upper()
         if any(x in col_upper for x in ["LOJA", "PEDIDO", "ESTOQUE", "TOTAL", "MÉDIA"]):
@@ -102,23 +101,31 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-        # 🔍 IDENTIFICAÇÃO DE COLUNAS (Ajustado para os novos nomes)
+        # ──────────────────────────────────────────────────────────
+        # 🔍 IDENTIFICAÇÃO DE COLUNAS (Agora com efeito Zebrado nas Lojas)
+        # ──────────────────────────────────────────────────────────
         colunas_verdes = []
         col_total_idx = None
         cols_para_soma = []
+        contador_loja = 0  # <--- Criamos um contador para saber qual loja é
 
         for col_num, column_title in enumerate(df_export.columns, 1):
             col_name = str(column_title).upper()
             
-            # Agora busca por "PEDIDO", "TOTAL", etc.
-            if any(x in col_name for x in ["LOJA", "PEDIDO", "TOTAL", "MÉDIA", "ESTOQUE"]):
-                colunas_verdes.append(col_num)
-            
             if "LOJA" in col_name:
                 cols_para_soma.append(col_num)
+                contador_loja += 1
+                # Se for loja ímpar (1, 3, 5, 7) pinta de verde. Se for par (2, 4, 6, 8) ignora (fica branco).
+                if contador_loja % 2 != 0:
+                    colunas_verdes.append(col_num)
+            
+            # Mantemos verde as outras colunas de métricas fixas
+            elif any(x in col_name for x in ["PEDIDO", "TOTAL", "MÉDIA", "ESTOQUE"]):
+                colunas_verdes.append(col_num)
                 
             if "TOTAL" in col_name:
                 col_total_idx = col_num
+        # ──────────────────────────────────────────────────────────
 
         # 🖌️ CABEÇALHO
         for col_num, cell in enumerate(worksheet[1], 1):
@@ -142,17 +149,16 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
                 if cell.column in colunas_verdes:
                     cell.fill = fill_green
 
-        # 🧮 INJETANDO FÓRMULA EXCEL NA COLUNA DE TOTAL (Ocultando o ZERO)
+        # 🧮 INJETANDO FÓRMULA EXCEL NA COLUNA DE TOTAL
         if col_total_idx and cols_para_soma:
             letra_total = get_column_letter(col_total_idx)
             letra_primeira = get_column_letter(min(cols_para_soma))
             letra_ultima = get_column_letter(max(cols_para_soma))
             
             for row_num in range(2, worksheet.max_row + 1):
-                # Fórmula condicional: Se a soma for maior que 0, mostra a soma. Se for 0, deixa vazio ("").
                 worksheet[f"{letra_total}{row_num}"].value = f'=IF(SUM({letra_primeira}{row_num}:{letra_ultima}{row_num})>0, SUM({letra_primeira}{row_num}:{letra_ultima}{row_num}), "")'
 
-        # 📏 LARGURA DAS COLUNAS (Ajustado para os novos nomes)
+        # 📏 LARGURA DAS COLUNAS
         for col_num, column_title in enumerate(df_export.columns, 1):
             letra = get_column_letter(col_num)
             col_name = str(column_title).upper()
