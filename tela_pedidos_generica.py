@@ -176,7 +176,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         worksheet = writer.book.create_sheet(nome_aba[:30])
         writer.book.active = worksheet
         
-        fill_header = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
+        fill_header = PatternFill(start_color="6FA8DC", end_color="6FA8DC", fill_type="solid")
         fill_green = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
