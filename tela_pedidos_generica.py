@@ -75,6 +75,14 @@ def setor_usa_iceasa(setor) -> bool:
     # Cód. Iceasa só existe p/ FLV Normal e FLV Ofertas
     return str(setor).strip().lower() in ("flv normal", "flv ofertas")
 
+def setor_sem_total(setor) -> bool:
+    # Matéria Prima, Embalagem e Padaria/Confeitaria pedem em texto (fardo, cx, fd...),
+    # então somar Total não faz sentido. Esses setores saem SEM coluna Total e COM Observação.
+    s = str(setor).strip().lower()
+    for a, b in (("á","a"),("é","e"),("í","i"),("ó","o"),("ú","u"),("â","a"),("ê","e"),("ô","o"),("ã","a"),("õ","o"),("ç","c")):
+        s = s.replace(a, b)
+    return any(k in s for k in ("materia prima", "embalagem", "padaria", "confeitaria"))
+
 def iceasa_para_impressao(v) -> str:
     # Regra da impressão/Excel BOX: vazio se ausente OU acima de 9000; senão o número
     try:
@@ -127,7 +135,7 @@ def buscar_estoque_erp(loja_nome, codigos_erp, setor):
 # ─────────────────────────────────────────────────────────────────────────────
 # 📊 MOTORES DE EXPORTAÇÃO EXCEL CUSTOMIZADOS (OPENPYXL)
 # ─────────────────────────────────────────────────────────────────────────────
-def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
+def gerar_excel_download(df: pd.DataFrame, nome_aba: str, sem_total: bool = False) -> bytes:
     df_export = df.copy()
     df_export = df_export.rename(columns={
         "Cód. ERP": "Código",
@@ -135,6 +143,11 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         "Qtde Pedida": "Pedido",
         "Estoque ERP": "Estoque"
     })
+
+    # Setores sem Total (matéria prima/embalagem/padaria): tira o Total e põe Observação manual
+    if sem_total:
+        df_export = df_export.drop(columns=[c for c in df_export.columns if "TOTAL" in str(c).upper()], errors="ignore")
+        df_export["Observação:"] = ""
 
     def limpar_valor_excel(v):
         if pd.isna(v): return None
@@ -157,8 +170,8 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
         df_export.to_excel(writer, index=False, sheet_name=nome_aba[:30], startrow=1)
         worksheet = writer.sheets[nome_aba[:30]]
 
-        fill_header = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        fill_green = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+        fill_header = PatternFill(start_color="C55A11", end_color="C55A11", fill_type="solid")
+        fill_green = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
         
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
@@ -229,6 +242,8 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str) -> bytes:
                 worksheet.column_dimensions[letra].width = 12
             elif "MÉDIA" in col_name or "ESTOQUE" in col_name: 
                 worksheet.column_dimensions[letra].width = 12
+            elif "OBSERV" in col_name:
+                worksheet.column_dimensions[letra].width = 22
             else: 
                 worksheet.column_dimensions[letra].width = 9 
 
@@ -252,8 +267,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
         worksheet = writer.book.create_sheet(nome_aba[:30])
         writer.book.active = worksheet
         
-        fill_header = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        fill_green = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+        fill_header = PatternFill(start_color="C55A11", end_color="C55A11", fill_type="solid")
+        fill_green = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
         font_header = Font(color="FFFFFF", bold=True)
         font_bold = Font(bold=True)
         font_normal = Font(bold=False)
@@ -1027,6 +1042,7 @@ def iniciar_tela(setor: str):
         df_consolidado = df_consolidado.rename(columns={'codigo_erp': 'Cód. ERP', 'codigo_iceasa': 'Cód. Iceasa', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
 
         usa_iceasa = setor_usa_iceasa(setor)
+        sem_total = setor_sem_total(setor)
         cols_cod = ["Cód. ERP", "Cód. Iceasa"] if usa_iceasa else ["Cód. ERP"]
         if usa_iceasa and "Cód. Iceasa" not in df_consolidado.columns:
             df_consolidado["Cód. Iceasa"] = None
@@ -1041,7 +1057,9 @@ def iniciar_tela(setor: str):
             df_consolidado["Observação"] = df_consolidado["codigo"].map(mapa_obs).fillna("").astype(str).replace({"None": "", "nan": "", "<NA>": ""})
             cols_extras = ["R$ Preço", "Observação"]
 
-        df_exibicao = df_consolidado[["Fornecedor", "codigo"] + cols_cod + ["Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"] + cols_extras].sort_values(by=['Fornecedor', 'Descrição'])
+        # Matéria Prima/Embalagem/Padaria: sem coluna Total (pedem em texto)
+        cols_total = [] if sem_total else ["TOTAL GERAL"]
+        df_exibicao = df_consolidado[["Fornecedor", "codigo"] + cols_cod + ["Descrição"] + LOJAS_NOMES + cols_total + cols_extras].sort_values(by=['Fornecedor', 'Descrição'])
 
         col_cfg = {
             "codigo": None, 
@@ -1081,6 +1099,8 @@ def iniciar_tela(setor: str):
         if usa_iceasa:
             df_print_sep['Cód. Iceasa'] = df_print_sep['Cód. Iceasa'].apply(iceasa_para_impressao)
             df_print_sep = df_print_sep.drop(columns=['Cód. ERP'], errors='ignore')
+        if sem_total:
+            df_print_sep["Observação:"] = ""   # coluna p/ anotação manual (igual ao modelo antigo)
         html_table = df_print_sep.to_html(index=False, classes="print-table")
         st.markdown(f'<div class="print-only"><h3>📊 Separação e Fechamento — {setor} ({filtro_selecionado})</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}</div>', unsafe_allow_html=True)
 
@@ -1094,7 +1114,7 @@ def iniciar_tela(setor: str):
                 excel_bytes = gerar_excel_box(df_export)
                 nome_arq = "molicenter.xlsx"
             else:
-                excel_bytes = gerar_excel_download(df_export, f"Fechamento {setor}")
+                excel_bytes = gerar_excel_download(df_export, f"Fechamento {setor}", sem_total=sem_total)
                 nome_arq = f"Separacao_Fechamento_{setor}.xlsx"
             st.download_button("📊 Exportar Excel", data=excel_bytes, file_name=nome_arq, use_container_width=True)
         with c_print: 
