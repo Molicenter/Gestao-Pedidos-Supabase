@@ -914,6 +914,8 @@ def iniciar_tela(setor: str):
                             supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
                             supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
                         st.session_state['confirmar_limpeza'] = False
+                        # reseta o editor p/ não ficar 'None' preso em células que foram apagadas
+                        st.session_state.pop("editor_separacao", None)
                         st.rerun()
                 with c2:
                     if st.button("❌ Não", use_container_width=True): 
@@ -1030,7 +1032,18 @@ def iniciar_tela(setor: str):
             col_cfg["Observação"] = st.column_config.TextColumn("Observação", width=145)
         for loja in LOJAS_NOMES: 
             col_cfg[loja] = st.column_config.TextColumn(loja, width=72, disabled=False)
-        
+
+        # 🧹 Antes de desenhar o editor: troca por vazio qualquer célula de Preço/Observação
+        # que o usuário apagou (o data_editor guarda 'None' no estado e mostra "None" na tela).
+        # Mexer no estado ANTES de instanciar o widget é permitido e faz a célula voltar a vazio.
+        if usa_iceasa:
+            _est = st.session_state.get("editor_separacao")
+            if isinstance(_est, dict) and isinstance(_est.get("edited_rows"), dict):
+                for _ch in _est["edited_rows"].values():
+                    for _c in ("R$ Preço", "Observação"):
+                        if _c in _ch and _ch[_c] is None:
+                            _ch[_c] = ""
+
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg, key="editor_separacao")
 
         # 🛡️ Alterações não salvas: compara lojas + (preço/obs no FLV)
