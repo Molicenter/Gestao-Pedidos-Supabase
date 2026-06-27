@@ -60,6 +60,27 @@ def iceasa_para_impressao(v) -> str:
         return ""
     return "" if n > 9000 else str(n)
 
+def preco_para_celula(v) -> str:
+    # float do banco -> texto BR p/ exibir no editor ("12,50"); vazio fica vazio (sem "None")
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    try:
+        return f"{float(v):.2f}".replace(".", ",")
+    except (ValueError, TypeError):
+        return ""
+
+def celula_para_preco(s):
+    # texto digitado ("R$ 12,50", "12.50", "12,5") -> float; vazio/inválido -> None
+    if s is None:
+        return None
+    t = str(s).strip().replace("R$", "").replace(" ", "").replace(",", ".")
+    if t == "":
+        return None
+    try:
+        return round(float(t), 2)
+    except ValueError:
+        return None
+
 def buscar_estoque_erp(loja_nome, codigos_erp, setor):
     if not codigos_erp: 
         return pd.DataFrame(columns=["Código", "Estoque"])
@@ -463,7 +484,11 @@ def injetar_botao_impressao():
     )
 
 def exibir_status_digitacao_lojas(df_pedidos_hoje):
-    st.markdown("<div class='no-print'>##### 🏪 Status de Digitação das Lojas (Hoje)</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='no-print' style='font-weight:600; font-size:1.05rem; margin:2px 0 6px 0;'>"
+        f"🏪 Status de Digitação das Lojas — {data_hora_brasilia()}</div>",
+        unsafe_allow_html=True,
+    )
     lojas_que_digitam = set()
     if not df_pedidos_hoje.empty:
         lojas_codigos = df_pedidos_hoje["loja"].unique()
@@ -976,25 +1001,25 @@ def iniciar_tela(setor: str):
             df_extras = carregar_extras(setor, str(data_brasilia()))
             mapa_preco = dict(zip(df_extras["codigo_produto"], df_extras["preco"])) if not df_extras.empty else {}
             mapa_obs = dict(zip(df_extras["codigo_produto"], df_extras["observacao"])) if not df_extras.empty else {}
-            df_consolidado["R$ Preço"] = pd.to_numeric(df_consolidado["codigo"].map(mapa_preco), errors="coerce")
-            df_consolidado["Observação"] = df_consolidado["codigo"].map(mapa_obs).fillna("")
+            df_consolidado["R$ Preço"] = df_consolidado["codigo"].map(mapa_preco).apply(preco_para_celula)
+            df_consolidado["Observação"] = df_consolidado["codigo"].map(mapa_obs).fillna("").astype(str).replace({"None": "", "nan": "", "<NA>": ""})
             cols_extras = ["R$ Preço", "Observação"]
 
         df_exibicao = df_consolidado[["Fornecedor", "codigo"] + cols_cod + ["Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"] + cols_extras].sort_values(by=['Fornecedor', 'Descrição'])
 
         col_cfg = {
             "codigo": None, 
-            "Cód. ERP": st.column_config.NumberColumn("Cód. ERP", disabled=True, format="%d", width=80), 
-            "Cód. Iceasa": st.column_config.NumberColumn("Cód. Iceasa", disabled=True, format="%d", width=90), 
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=110), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
-            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
+            "Cód. ERP": st.column_config.NumberColumn("Cód. ERP", disabled=True, format="%d", width=72), 
+            "Cód. Iceasa": st.column_config.NumberColumn("Cód. Iceasa", disabled=True, format="%d", width=80), 
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=95), 
+            "Descrição": st.column_config.TextColumn(disabled=True, width=180), 
+            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=58)
         }
         if usa_iceasa:
-            col_cfg["R$ Preço"] = st.column_config.NumberColumn("R$ Preço", format="R$ %.2f", min_value=0.0, step=0.01, width=100)
-            col_cfg["Observação"] = st.column_config.TextColumn("Observação", width=200)
+            col_cfg["R$ Preço"] = st.column_config.TextColumn("R$ Preço", width=90, help="Preço do dia (ex.: 12,50). Deixe vazio se não houver.")
+            col_cfg["Observação"] = st.column_config.TextColumn("Observação", width=150)
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.TextColumn(loja, width=75, disabled=False)
+            col_cfg[loja] = st.column_config.TextColumn(loja, width=58, disabled=False)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg, key="editor_separacao")
 
@@ -1051,9 +1076,8 @@ def iniciar_tela(setor: str):
                             supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods[i:i+200]).execute()
                         lista_extras = []
                         for _, r in df_editado.iterrows():
-                            preco_raw = r.get("R$ Preço")
+                            preco_val = celula_para_preco(r.get("R$ Preço"))
                             obs_raw = r.get("Observação")
-                            preco_val = float(preco_raw) if pd.notna(preco_raw) else None
                             obs_val = str(obs_raw).strip() if pd.notna(obs_raw) and str(obs_raw).strip() != "" else None
                             if preco_val is not None or obs_val is not None:
                                 lista_extras.append({"codigo_produto": int(r["codigo"]), "data_pedido": str(data_brasilia()), "setor": setor, "preco": preco_val, "observacao": obs_val})
