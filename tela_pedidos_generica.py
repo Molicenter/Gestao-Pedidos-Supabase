@@ -14,6 +14,29 @@ from openpyxl import Workbook
 
 LOJAS_NOMES = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 🚚 MAPA FIXO FORNECEDOR → PRODUTOS (por código Iceasa) — usado só no FLV.
+# Não vai pro banco: a visão "Pedido por Fornecedor" só PUXA quantidade (pedidos)
+# e preço (Separação) já existentes. Pra mudar permanentemente quem vende o quê,
+# edita-se este dicionário. Os "de linha" saem no layout girado (lojas nas linhas).
+# ─────────────────────────────────────────────────────────────────────────────
+MAPA_FORNECEDORES_FLV = {
+    "NIDE": [45, 49, 67, 57, 46, 48, 47], "Claudir Mendes": [57, 46, 49], "SANDRO": [75],
+    "DENIZE": [45, 49, 67, 57, 46, 48, 47, 41, 52, 69, 56], "JOVANO": [1746, 88, 49, 140, 85],
+    "JEFINHO": [85, 140, 256, 267, 88, 57, 45, 49, 1662, 46], "LUCIANO": [61, 41, 49, 56, 45],
+    "THIAGO": [61, 91, 67, 74, 49, 52, 45, 56], "CRISTIAN": [40, 949, 42, 83, 68, 538, 78],
+    "ROGERIO NARANTE": [538], "FERNANDO NARANTE": [46], "SILVIO MAND SALSA": [76],
+    "HORTA": [108, 109], "GLAUCIA MACIEL": [84, 85], "ALEMÃO": [39], "RENAN SS": [72],
+    "NEGUIN": [85, 86, 88, 61, 45], "RODRIGO CHANAN": [85, 86, 88, 61, 1662, 140],
+    "MARCELO MORANGO": [58], "JOÃO BATISTA": [79, 60, 56, 1662, 69], "GIACOMELLO": [95],
+    "PRIMO": [240, 86, 49, 45, 88, 85], "RENATO MANDIOCA": [75], "THIAGO SERRA": [91, 49, 45, 56, 61],
+    "TICO": [236, 237, 707, 2730, 42, 581, 78, 546, 80, 83, 540, 949, 40, 110, 68, 109],
+    "ALGACIR": [1516, 53], "MAURICIO": [62], "PAULO IGASHIBAHI": [47, 48],
+    "GILSOM BATATA": [508, 551], "DORI BATATA": [508, 551], "BANANA SANTOME": [2567, 2569, 2568],
+    "MELANCIA CARLIN": [1], "MELANCIA MARCINHO": [673, 1, 3003], "RODRIGO BATATA": [508],
+}
+FORNECEDORES_LINHA_FLV = {"BANANA SANTOME", "MELANCIA CARLIN", "MELANCIA MARCINHO", "RODRIGO BATATA"}
+
 @st.cache_resource
 def obter_supabase() -> Client:
     # cache_resource: reaproveita o MESMO cliente entre reruns/sessões em vez de
@@ -545,16 +568,6 @@ def carregar_extras(setor: str, data_str: str) -> pd.DataFrame:
     supabase = obter_supabase()
     resp = supabase.table("separacao_extras").select("codigo_produto, preco, observacao").eq("setor", setor).eq("data_pedido", data_str).execute()
     return pd.DataFrame(resp.data)
-
-@st.cache_data(ttl=300, show_spinner=False)
-def carregar_fornecedores_pedido(setor: str) -> pd.DataFrame:
-    # Vínculo fornecedor→produto (NIDE, Claudir...). Muda pouco; cacheado e limpo no save.
-    supabase = obter_supabase()
-    resp = supabase.table("fornecedores_pedido").select("fornecedor, codigo_produto, linha, ordem").eq("setor", setor).execute()
-    df = pd.DataFrame(resp.data)
-    if df.empty:
-        return pd.DataFrame(columns=["fornecedor", "codigo_produto", "linha", "ordem"])
-    return df
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🛡️ PROTEÇÃO CONTRA PERDA DE DIGITAÇÃO (avisa antes de fechar/recarregar a aba)
@@ -1450,21 +1463,20 @@ def iniciar_tela(setor: str):
         cod_por_label = {v: k for k, v in label_por_cod.items()}
         opcoes_labels = sorted(label_por_cod.values(), key=lambda s: s.lower())
 
-        # Config atual (fornecedor → produtos + flag de layout girado)
-        df_fp = carregar_fornecedores_pedido(setor)
+        # Config FIXA (fornecedor → produtos), resolvendo Iceasa → produto do setor atual.
+        # Não vem do banco: a visão só puxa quantidade/preço já existentes.
+        cod_por_iceasa = {}
+        for _, r in df_prod.iterrows():
+            ice = r["codigo_iceasa"]
+            if pd.notna(ice):
+                cod_por_iceasa[int(ice)] = int(r["codigo"])
         config = {}
-        if not df_fp.empty:
-            for forn, grp in df_fp.sort_values(by=["fornecedor", "ordem"]).groupby("fornecedor", sort=False):
-                cods = [int(c) for c in grp.sort_values("ordem")["codigo_produto"].tolist() if int(c) in label_por_cod]
-                config[str(forn)] = {"codigos": cods, "linha": bool(grp["linha"].iloc[0])}
+        for forn, iceasas in MAPA_FORNECEDORES_FLV.items():
+            cods = [cod_por_iceasa[int(ic)] for ic in iceasas if int(ic) in cod_por_iceasa]
+            config[forn] = {"codigos": cods, "linha": forn in FORNECEDORES_LINHA_FLV}
 
-        if not config:
-            st.info("Nenhum fornecedor cadastrado ainda. Rode o SQL de carga inicial no Supabase (ou adicione abaixo).")
-
-        ver_key = f"fp_ver_{setor}"
-        st.session_state.setdefault(ver_key, 0)
-        ver = st.session_state[ver_key]
-        extras_key = f"fp_extras_{setor}_{ver}"
+        # Fornecedores extras adicionados nesta sessão (só p/ ajustar a impressão; não persiste)
+        extras_key = f"fp_extras_{setor}"
         st.session_state.setdefault(extras_key, [])
         nomes_forn = list(config.keys()) + [n for n in st.session_state[extras_key] if n not in config]
 
@@ -1475,25 +1487,23 @@ def iniciar_tela(setor: str):
             except (ValueError, TypeError):
                 return 0.0
 
-        # Topo: adicionar fornecedor + salvar
+        # Topo: adicionar fornecedor (sessão) + imprimir. Edições aqui são só p/ a impressão do dia.
         st.markdown("<div class='no-print'>", unsafe_allow_html=True)
-        c_add, c_addbtn, c_save = st.columns([3, 1.2, 2])
+        st.caption("As quantidades e preços vêm dos pedidos das lojas e da Separação. Ajustes de nome/produtos aqui valem só para a impressão atual.")
+        c_add, c_addbtn = st.columns([3, 1.2])
         with c_add:
-            novo_nome = st.text_input("➕ Novo fornecedor:", key=f"fp_novo_{setor}_{ver}", placeholder="Nome do fornecedor")
+            novo_nome = st.text_input("➕ Novo fornecedor:", key=f"fp_novo_{setor}", placeholder="Nome do fornecedor")
         with c_addbtn:
             st.write("")
-            if st.button("Adicionar", use_container_width=True, key=f"fp_addbtn_{setor}_{ver}"):
+            if st.button("Adicionar", use_container_width=True, key=f"fp_addbtn_{setor}"):
                 nn = str(novo_nome).strip()
                 if nn and nn not in nomes_forn:
                     st.session_state[extras_key].append(nn)
                     st.rerun()
-        with c_save:
-            st.write("")
-            btn_salvar_fp = st.button("💾 Salvar Fornecedores", type="primary", use_container_width=True, key=f"fp_save_{setor}_{ver}")
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Render dos cards (2 colunas) — edição na tela; coleta o estado p/ salvar/imprimir
-        estado_ui, blocos_print = [], []
+        # Render dos cards (2 colunas) — edição (só p/ impressão) e montagem do bloco de print
+        blocos_print = []
         for i in range(0, len(nomes_forn), 2):
             cols = st.columns(2, gap="small")
             for j, forn in enumerate(nomes_forn[i:i + 2]):
@@ -1501,15 +1511,14 @@ def iniciar_tela(setor: str):
                 with cols[j]:
                     with st.container(border=True):
                         st.markdown("<div class='no-print'>", unsafe_allow_html=True)
-                        nome_edit = st.text_input("Fornecedor", value=forn, key=f"fp_nome_{setor}_{ver}_{i+j}", label_visibility="collapsed")
+                        nome_edit = st.text_input("Fornecedor", value=forn, key=f"fp_nome_{setor}_{i+j}", label_visibility="collapsed")
                         default_labels = [label_por_cod[c] for c in cfg["codigos"] if c in label_por_cod]
-                        sel_labels = st.multiselect("Produtos", options=opcoes_labels, default=default_labels, key=f"fp_prod_{setor}_{ver}_{i+j}", label_visibility="collapsed", placeholder="Produtos deste fornecedor")
-                        linha_edit = st.checkbox("Layout girado (lojas nas linhas)", value=cfg["linha"], key=f"fp_linha_{setor}_{ver}_{i+j}")
+                        sel_labels = st.multiselect("Produtos", options=opcoes_labels, default=default_labels, key=f"fp_prod_{setor}_{i+j}", label_visibility="collapsed", placeholder="Produtos deste fornecedor")
+                        linha_edit = st.checkbox("Layout girado (lojas nas linhas)", value=cfg["linha"], key=f"fp_linha_{setor}_{i+j}")
                         st.markdown("</div>", unsafe_allow_html=True)
 
                         nome_final = str(nome_edit).strip()
                         cods_sel = [cod_por_label[l] for l in sel_labels if l in cod_por_label]
-                        estado_ui.append((nome_final, cods_sel, bool(linha_edit)))
 
                         if not cods_sel:
                             st.caption("Sem produtos selecionados.")
@@ -1557,7 +1566,7 @@ def iniciar_tela(setor: str):
         if blocos_print:
             corpo = "".join(f'<div style="page-break-inside:avoid;">{b}</div>' for b in blocos_print)
             st.markdown(
-                f'<div class="print-only print-fornecedores"><h3>🚚 Pedido por Fornecedor — {setor}</h3>'
+                f'<div class="print-only"><h3>🚚 Pedido por Fornecedor — {setor}</h3>'
                 f'<div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{corpo}</div>',
                 unsafe_allow_html=True,
             )
@@ -1566,23 +1575,6 @@ def iniciar_tela(setor: str):
         c_print, _ = st.columns([1, 4])
         with c_print:
             injetar_botao_impressao()
-
-        if btn_salvar_fp:
-            with st.spinner("Salvando fornecedores..."):
-                supabase.table("fornecedores_pedido").delete().eq("setor", setor).execute()
-                linhas_ins = []
-                for nome, cods, linha in estado_ui:
-                    if not nome or not cods:
-                        continue
-                    for ordem, cod in enumerate(cods):
-                        linhas_ins.append({"setor": setor, "fornecedor": nome, "codigo_produto": int(cod), "linha": bool(linha), "ordem": ordem})
-                for k in range(0, len(linhas_ins), 1000):
-                    if linhas_ins[k:k + 1000]:
-                        supabase.table("fornecedores_pedido").insert(linhas_ins[k:k + 1000]).execute()
-            carregar_fornecedores_pedido.clear()
-            st.session_state[ver_key] = ver + 1   # reseta os widgets dos cards
-            st.success("✅ Fornecedores salvos!")
-            st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 4 — CATÁLOGO DE PRODUTOS
