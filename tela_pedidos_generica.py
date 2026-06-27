@@ -48,6 +48,18 @@ def converter_para_int_seguro(valor) -> int:
     except ValueError:
         return 0
 
+def setor_usa_iceasa(setor) -> bool:
+    # Cód. Iceasa só existe p/ FLV Normal e FLV Ofertas
+    return str(setor).strip().lower() in ("flv normal", "flv ofertas")
+
+def iceasa_para_impressao(v) -> str:
+    # Regra da impressão/Excel BOX: vazio se ausente OU acima de 9000; senão o número
+    try:
+        n = int(float(str(v).strip()))
+    except (ValueError, TypeError):
+        return ""
+    return "" if n > 9000 else str(n)
+
 def buscar_estoque_erp(loja_nome, codigos_erp, setor):
     if not codigos_erp: 
         return pd.DataFrame(columns=["Código", "Estoque"])
@@ -312,8 +324,8 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
 # ─────────────────────────────────────────────────────────────────────────────
 def gerar_excel_box(df: pd.DataFrame) -> bytes:
     """Layout 'PEDIDO BOX' replicando o molicenter_final.xlsx.
-    A CODIGO | B PRODUTOS MOLICENTER | C-J 291..298 | K-P spacer oculto |
-    Q TOTAL | R PREÇO | S OBS. Código > 9000 sai em branco na coluna A."""
+    A CODIGO (= Cód. Iceasa) | B PRODUTOS MOLICENTER | C-J 291..298 | K-P spacer oculto |
+    Q TOTAL | R PREÇO | S OBS. Iceasa vazio ou > 9000 sai em branco na coluna A."""
     wb = Workbook()
     ws = wb.active
     ws.title = "PEDIDO BOX"
@@ -375,7 +387,7 @@ def gerar_excel_box(df: pd.DataFrame) -> bytes:
 
     r = 3
     for _, row in df.iterrows():
-        ws.cell(row=r, column=1, value=_cod_box(row.get("Cód. ERP")))
+        ws.cell(row=r, column=1, value=_cod_box(row.get("Cód. Iceasa")))
         ws.cell(row=r, column=2, value=str(row.get("Descrição", "")).strip())
         for i, loja in enumerate(LOJAS_NOMES):
             ws.cell(row=r, column=3 + i, value=_qtd_box(row.get(loja)))
@@ -489,7 +501,7 @@ def buscar_permissoes_setor(_supabase_client, codigos_setor, num_loja=None):
 def carregar_produtos(setor: str, somente_ativos: bool = False) -> pd.DataFrame:
     # Catálogo do setor (muda pouco durante o dia). Cacheado por (setor, somente_ativos).
     supabase = obter_supabase()
-    q = supabase.table("produtos").select("codigo, codigo_erp, descricao, fornecedor, nome_personalizado").eq("setor", setor)
+    q = supabase.table("produtos").select("codigo, codigo_erp, codigo_iceasa, descricao, fornecedor, nome_personalizado").eq("setor", setor)
     if somente_ativos:
         q = q.eq("ativo", True)
     resp = q.execute()
@@ -935,12 +947,18 @@ def iniciar_tela(setor: str):
             if perm_col in df_consolidado.columns: 
                 df_consolidado.loc[df_consolidado[perm_col] != True, loja] = "-"
 
-        df_consolidado = df_consolidado.rename(columns={'codigo_erp': 'Cód. ERP', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
-        df_exibicao = df_consolidado[["Fornecedor", "codigo", "Cód. ERP", "Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by=['Fornecedor', 'Descrição'])
+        df_consolidado = df_consolidado.rename(columns={'codigo_erp': 'Cód. ERP', 'codigo_iceasa': 'Cód. Iceasa', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
+
+        usa_iceasa = setor_usa_iceasa(setor)
+        cols_cod = ["Cód. ERP", "Cód. Iceasa"] if usa_iceasa else ["Cód. ERP"]
+        if usa_iceasa and "Cód. Iceasa" not in df_consolidado.columns:
+            df_consolidado["Cód. Iceasa"] = None
+        df_exibicao = df_consolidado[["Fornecedor", "codigo"] + cols_cod + ["Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by=['Fornecedor', 'Descrição'])
 
         col_cfg = {
             "codigo": None, 
             "Cód. ERP": st.column_config.NumberColumn("Cód. ERP", disabled=True, format="%d", width=80), 
+            "Cód. Iceasa": st.column_config.NumberColumn("Cód. Iceasa", disabled=True, format="%d", width=90), 
             "Fornecedor": st.column_config.TextColumn(disabled=True, width=110), 
             "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
             "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
@@ -955,9 +973,11 @@ def iniciar_tela(setor: str):
         edit_sep = df_editado[LOJAS_NOMES].fillna("").astype(str).values.tolist()
         guardar_contra_saida(orig_sep != edit_sep)
         
-        # 🔥 AJUSTE — troca as células que são exatamente "-" por vazio só na impressão.
-        # (replace com valor escalar casa a célula inteira; não mexe em nomes de produto)
+        # 🔥 Impressão: troca "-" por vazio; e p/ FLV o código impresso é o Iceasa (ERP sai)
         df_print_sep = df_exibicao.drop(columns=['codigo'], errors='ignore').fillna('').replace("-", "")
+        if usa_iceasa:
+            df_print_sep['Cód. Iceasa'] = df_print_sep['Cód. Iceasa'].apply(iceasa_para_impressao)
+            df_print_sep = df_print_sep.drop(columns=['Cód. ERP'], errors='ignore')
         html_table = df_print_sep.to_html(index=False, classes="print-table")
         st.markdown(f'<div class="print-only"><h3>📊 Separação e Fechamento — {setor} ({filtro_selecionado})</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}</div>', unsafe_allow_html=True)
 
@@ -1210,16 +1230,21 @@ def iniciar_tela(setor: str):
 
         all_edited_frames = []
 
+        usa_iceasa = setor_usa_iceasa(setor)
         for forn in sorted(df_mestre["fornecedor"].dropna().unique()):
             df_forn_bruto = df_mestre[df_mestre["fornecedor"] == forn]
             lojas_ativas = [l for l in LOJAS_NOMES if not (df_forn_bruto[l] == "-").all()]
-            df_forn_view = df_forn_bruto[["codigo", "codigo_erp", "descricao"] + lojas_ativas + ["TOTAL GERAL"]].rename(columns={'codigo_erp': 'Cód. ERP', 'descricao': 'Produto'}).sort_values(by='Produto')
+            cols_cod_f = ["codigo_erp", "codigo_iceasa"] if usa_iceasa else ["codigo_erp"]
+            if usa_iceasa and "codigo_iceasa" not in df_forn_bruto.columns:
+                df_forn_bruto = df_forn_bruto.assign(codigo_iceasa=None)
+            df_forn_view = df_forn_bruto[["codigo"] + cols_cod_f + ["descricao"] + lojas_ativas + ["TOTAL GERAL"]].rename(columns={'codigo_erp': 'Cód. ERP', 'codigo_iceasa': 'Cód. Iceasa', 'descricao': 'Produto'}).sort_values(by='Produto')
             
             with st.container(border=True):
                 st.markdown(f"<div class='no-print'><h5>Fornecedor: {forn}</h5></div>", unsafe_allow_html=True)
                 col_cfg_f = {
                     "codigo": None,
                     "Cód. ERP": st.column_config.NumberColumn(disabled=True, width=80, format="%d"),
+                    "Cód. Iceasa": st.column_config.NumberColumn(disabled=True, width=90, format="%d"),
                     "Produto": st.column_config.TextColumn(disabled=True, width=250),
                     "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
                 }
@@ -1228,7 +1253,12 @@ def iniciar_tela(setor: str):
                     
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
-                html_table = df_forn_view.drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
+                # Impressão: p/ FLV o código mostrado é o Iceasa (ERP sai), com regra >9000/vazio
+                df_forn_print = df_forn_view.drop(columns=['codigo'], errors='ignore').fillna('')
+                if usa_iceasa:
+                    df_forn_print['Cód. Iceasa'] = df_forn_print['Cód. Iceasa'].apply(iceasa_para_impressao)
+                    df_forn_print = df_forn_print.drop(columns=['Cód. ERP'], errors='ignore')
+                html_table = df_forn_print.to_html(index=False, classes="print-table")
                 st.markdown(f'<div class="print-only print-fornecedores"><h4 class="supplier-header">🚚 Fornecedor: {forn}</h4>{html_table}</div>', unsafe_allow_html=True)
                 
                 for l in LOJAS_NOMES:
@@ -1314,6 +1344,10 @@ def iniciar_tela(setor: str):
         else: 
             df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
 
+        usa_iceasa = setor_usa_iceasa(setor)
+        if usa_iceasa and 'codigo_iceasa' not in df_cat_completo.columns:
+            df_cat_completo['codigo_iceasa'] = None
+
         if not df_cat_completo.empty: 
             df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao']).reset_index(drop=True)
 
@@ -1324,10 +1358,15 @@ def iniciar_tela(setor: str):
             "nome_personalizado": st.column_config.TextColumn("Nome Manual", width=160),
             "fornecedor": st.column_config.TextColumn("Fornecedor", width=130)
         }
+        if usa_iceasa:
+            col_cfg_c["codigo_iceasa"] = st.column_config.NumberColumn("Cód. Iceasa", format="%d", width=90)
         for l in LOJAS_NOMES: 
             col_cfg_c[l] = st.column_config.CheckboxColumn(l)
 
-        cols_exibicao = ["fornecedor", "codigo", "codigo_erp", "descricao", "nome_personalizado"] + LOJAS_NOMES
+        cols_base = ["fornecedor", "codigo", "codigo_erp"]
+        if usa_iceasa:
+            cols_base.append("codigo_iceasa")
+        cols_exibicao = cols_base + ["descricao", "nome_personalizado"] + LOJAS_NOMES
         edited_cat = st.data_editor(df_cat_completo[cols_exibicao], use_container_width=True, hide_index=True, column_config=col_cfg_c, num_rows="dynamic", key="catalogo_editor")
 
         html_table = df_cat_completo[cols_exibicao].drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
@@ -1376,6 +1415,12 @@ def iniciar_tela(setor: str):
                             if "codigo_erp" in changes:
                                 try: prod_changes["codigo_erp"] = int(changes["codigo_erp"])
                                 except: pass
+                            if "codigo_iceasa" in changes:
+                                val_ice = changes["codigo_iceasa"]
+                                try:
+                                    prod_changes["codigo_iceasa"] = int(val_ice) if pd.notna(val_ice) and str(val_ice).strip() != "" else None
+                                except (ValueError, TypeError):
+                                    prod_changes["codigo_iceasa"] = None
                             if prod_changes: 
                                 supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
@@ -1389,6 +1434,13 @@ def iniciar_tela(setor: str):
                             forn_add = str(row.get("fornecedor", "Box")).strip()
                             desc_add = str(row.get("descricao", "Novo Produto")).strip()
                             np_add = str(row.get("nome_personalizado", "")).strip() if pd.notna(row.get("nome_personalizado")) and str(row.get("nome_personalizado")).strip() != "" else None
+                            ice_add = None
+                            if usa_iceasa:
+                                v_ice = row.get("codigo_iceasa")
+                                try:
+                                    ice_add = int(v_ice) if pd.notna(v_ice) and str(v_ice).strip() != "" else None
+                                except (ValueError, TypeError):
+                                    ice_add = None
                             if cod_final in codigos_globais:
                                 base_str = str(cod_final)
                                 for i in range(1, 100):
@@ -1400,6 +1452,7 @@ def iniciar_tela(setor: str):
                             mapa_conflitos[(cod_erp_digitado, forn_add)] = cod_final
                             supabase.table("produtos").insert({
                                 "codigo": cod_final, "codigo_erp": cod_erp_digitado,
+                                "codigo_iceasa": ice_add,
                                 "descricao": desc_add, "fornecedor": forn_add, 
                                 "nome_personalizado": np_add, "setor": setor, "ativo": True
                             }).execute()
