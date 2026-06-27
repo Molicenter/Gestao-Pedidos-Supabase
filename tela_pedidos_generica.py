@@ -514,6 +514,13 @@ def carregar_medias(num_loja: int) -> pd.DataFrame:
     resp = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
     return pd.DataFrame(resp.data)
 
+def carregar_extras(setor: str, data_str: str) -> pd.DataFrame:
+    # Preço/observação do dia (preenchidos manualmente na Separação). SEM cache, pois
+    # mudam quando o comprador digita e salva — precisa refletir na hora.
+    supabase = obter_supabase()
+    resp = supabase.table("separacao_extras").select("codigo_produto, preco, observacao").eq("setor", setor).eq("data_pedido", data_str).execute()
+    return pd.DataFrame(resp.data)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🛡️ PROTEÇÃO CONTRA PERDA DE DIGITAÇÃO (avisa antes de fechar/recarregar a aba)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -862,6 +869,7 @@ def iniciar_tela(setor: str):
                     if st.button("✔️ Sim", type="primary", use_container_width=True):
                         with st.spinner("Limpando..."): 
                             supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+                            supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
                         st.session_state['confirmar_limpeza'] = False
                         st.rerun()
                 with c2:
@@ -953,7 +961,18 @@ def iniciar_tela(setor: str):
         cols_cod = ["Cód. ERP", "Cód. Iceasa"] if usa_iceasa else ["Cód. ERP"]
         if usa_iceasa and "Cód. Iceasa" not in df_consolidado.columns:
             df_consolidado["Cód. Iceasa"] = None
-        df_exibicao = df_consolidado[["Fornecedor", "codigo"] + cols_cod + ["Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"]].sort_values(by=['Fornecedor', 'Descrição'])
+
+        # 💲 Preço/Observação do dia (só FLV): carrega o que já foi digitado e mapeia por codigo
+        cols_extras = []
+        if usa_iceasa:
+            df_extras = carregar_extras(setor, str(data_brasilia()))
+            mapa_preco = dict(zip(df_extras["codigo_produto"], df_extras["preco"])) if not df_extras.empty else {}
+            mapa_obs = dict(zip(df_extras["codigo_produto"], df_extras["observacao"])) if not df_extras.empty else {}
+            df_consolidado["R$ Preço"] = pd.to_numeric(df_consolidado["codigo"].map(mapa_preco), errors="coerce")
+            df_consolidado["Observação"] = df_consolidado["codigo"].map(mapa_obs).fillna("")
+            cols_extras = ["R$ Preço", "Observação"]
+
+        df_exibicao = df_consolidado[["Fornecedor", "codigo"] + cols_cod + ["Descrição"] + LOJAS_NOMES + ["TOTAL GERAL"] + cols_extras].sort_values(by=['Fornecedor', 'Descrição'])
 
         col_cfg = {
             "codigo": None, 
@@ -963,18 +982,22 @@ def iniciar_tela(setor: str):
             "Descrição": st.column_config.TextColumn(disabled=True, width=200), 
             "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
         }
+        if usa_iceasa:
+            col_cfg["R$ Preço"] = st.column_config.NumberColumn("R$ Preço", format="R$ %.2f", min_value=0.0, step=0.01, width=100)
+            col_cfg["Observação"] = st.column_config.TextColumn("Observação", width=200)
         for loja in LOJAS_NOMES: 
             col_cfg[loja] = st.column_config.TextColumn(loja, width=75, disabled=False)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg, key="editor_separacao")
 
-        # 🛡️ Detecta alterações não salvas comparando as colunas de loja (original x editado)
-        orig_sep = df_exibicao[LOJAS_NOMES].fillna("").astype(str).values.tolist()
-        edit_sep = df_editado[LOJAS_NOMES].fillna("").astype(str).values.tolist()
+        # 🛡️ Alterações não salvas: compara lojas + (preço/obs no FLV)
+        cols_guarda = LOJAS_NOMES + cols_extras
+        orig_sep = df_exibicao[cols_guarda].fillna("").astype(str).values.tolist()
+        edit_sep = df_editado[cols_guarda].fillna("").astype(str).values.tolist()
         guardar_contra_saida(orig_sep != edit_sep)
         
-        # 🔥 Impressão: troca "-" por vazio; e p/ FLV o código impresso é o Iceasa (ERP sai)
-        df_print_sep = df_exibicao.drop(columns=['codigo'], errors='ignore').fillna('').replace("-", "")
+        # 🔥 Impressão: troca "-" por vazio; FLV imprime o Iceasa (ERP sai). Preço/Obs ficam fora da impressão por ora.
+        df_print_sep = df_exibicao.drop(columns=['codigo', 'R$ Preço', 'Observação'], errors='ignore').fillna('').replace("-", "")
         if usa_iceasa:
             df_print_sep['Cód. Iceasa'] = df_print_sep['Cód. Iceasa'].apply(iceasa_para_impressao)
             df_print_sep = df_print_sep.drop(columns=['Cód. ERP'], errors='ignore')
@@ -1013,6 +1036,21 @@ def iniciar_tela(setor: str):
                         
                         if lista_ins: 
                             supabase.table("pedidos").insert(lista_ins).execute()
+
+                    # 💲 Preço/Observação do dia (só FLV): regrava o que tiver valor
+                    if usa_iceasa:
+                        for i in range(0, len(cods), 200):
+                            supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods[i:i+200]).execute()
+                        lista_extras = []
+                        for _, r in df_editado.iterrows():
+                            preco_raw = r.get("R$ Preço")
+                            obs_raw = r.get("Observação")
+                            preco_val = float(preco_raw) if pd.notna(preco_raw) else None
+                            obs_val = str(obs_raw).strip() if pd.notna(obs_raw) and str(obs_raw).strip() != "" else None
+                            if preco_val is not None or obs_val is not None:
+                                lista_extras.append({"codigo_produto": int(r["codigo"]), "data_pedido": str(data_brasilia()), "setor": setor, "preco": preco_val, "observacao": obs_val})
+                        for i in range(0, len(lista_extras), 1000):
+                            supabase.table("separacao_extras").insert(lista_extras[i:i+1000]).execute()
             st.success("Alterações consolidadas!")
             # limpa o estado do editor para o guarda de "não salvo" desligar
             st.session_state.pop("editor_separacao", None)
