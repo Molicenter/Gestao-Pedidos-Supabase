@@ -61,11 +61,11 @@ def iceasa_para_impressao(v) -> str:
     return "" if n > 9000 else str(n)
 
 def preco_para_celula(v) -> str:
-    # float do banco -> texto BR p/ exibir no editor ("12,50"); vazio fica vazio (sem "None")
+    # float do banco -> texto BR com R$ p/ exibir no editor ("R$ 12,50"); vazio fica vazio (sem "None")
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return ""
     try:
-        return f"{float(v):.2f}".replace(".", ",")
+        return f"R$ {float(v):.2f}".replace(".", ",")
     except (ValueError, TypeError):
         return ""
 
@@ -803,12 +803,22 @@ def iniciar_tela(setor: str):
     with st.sidebar:
         st.markdown(f"### Parâmetros: {setor}")
         if acesso_total:
-            perfil_navegacao = st.radio("📍 Navegação Interna:", [
-                "Visão Fornecedores (Resumo)",
-                "Separação e Fechamento", 
-                "Visão das Lojas", 
-                "Catálogo de Produtos"
-            ])
+            if setor_usa_iceasa(setor):
+                # FLV Normal/Ofertas entram direto na Separação e Fechamento
+                opcoes_nav = [
+                    "Separação e Fechamento",
+                    "Visão Fornecedores (Resumo)",
+                    "Visão das Lojas",
+                    "Catálogo de Produtos",
+                ]
+            else:
+                opcoes_nav = [
+                    "Visão Fornecedores (Resumo)",
+                    "Separação e Fechamento",
+                    "Visão das Lojas",
+                    "Catálogo de Produtos",
+                ]
+            perfil_navegacao = st.radio("📍 Navegação Interna:", opcoes_nav)
         else:
             perfil_navegacao = "Visão das Lojas"
 
@@ -1009,17 +1019,17 @@ def iniciar_tela(setor: str):
 
         col_cfg = {
             "codigo": None, 
-            "Cód. ERP": st.column_config.NumberColumn("Cód. ERP", disabled=True, format="%d", width=72), 
-            "Cód. Iceasa": st.column_config.NumberColumn("Cód. Iceasa", disabled=True, format="%d", width=80), 
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=95), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width=180), 
-            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=58)
+            "Cód. ERP": st.column_config.NumberColumn("Cód. ERP", disabled=True, format="%d", width=70), 
+            "Cód. Iceasa": st.column_config.NumberColumn("Cód. Iceasa", disabled=True, format="%d", width=78), 
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=90), 
+            "Descrição": st.column_config.TextColumn(disabled=True, width=175), 
+            "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=56)
         }
         if usa_iceasa:
-            col_cfg["R$ Preço"] = st.column_config.TextColumn("R$ Preço", width=90, help="Preço do dia (ex.: 12,50). Deixe vazio se não houver.")
-            col_cfg["Observação"] = st.column_config.TextColumn("Observação", width=150)
+            col_cfg["R$ Preço"] = st.column_config.TextColumn("R$ Preço", width=88, help="Preço do dia (ex.: 12,50). Deixe vazio se não houver.")
+            col_cfg["Observação"] = st.column_config.TextColumn("Observação", width=145)
         for loja in LOJAS_NOMES: 
-            col_cfg[loja] = st.column_config.TextColumn(loja, width=58, disabled=False)
+            col_cfg[loja] = st.column_config.TextColumn(loja, width=72, disabled=False)
         
         df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg, key="editor_separacao")
 
