@@ -546,6 +546,16 @@ def carregar_extras(setor: str, data_str: str) -> pd.DataFrame:
     resp = supabase.table("separacao_extras").select("codigo_produto, preco, observacao").eq("setor", setor).eq("data_pedido", data_str).execute()
     return pd.DataFrame(resp.data)
 
+@st.cache_data(ttl=300, show_spinner=False)
+def carregar_fornecedores_pedido(setor: str) -> pd.DataFrame:
+    # Vínculo fornecedor→produto (NIDE, Claudir...). Muda pouco; cacheado e limpo no save.
+    supabase = obter_supabase()
+    resp = supabase.table("fornecedores_pedido").select("fornecedor, codigo_produto, linha, ordem").eq("setor", setor).execute()
+    df = pd.DataFrame(resp.data)
+    if df.empty:
+        return pd.DataFrame(columns=["fornecedor", "codigo_produto", "linha", "ordem"])
+    return df
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🛡️ PROTEÇÃO CONTRA PERDA DE DIGITAÇÃO (avisa antes de fechar/recarregar a aba)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -807,6 +817,7 @@ def iniciar_tela(setor: str):
                 # FLV Normal/Ofertas entram direto na Separação e Fechamento
                 opcoes_nav = [
                     "Separação e Fechamento",
+                    "Pedido por Fornecedor",
                     "Visão Fornecedores (Resumo)",
                     "Visão das Lojas",
                     "Catálogo de Produtos",
@@ -1392,6 +1403,186 @@ def iniciar_tela(setor: str):
                                 supabase.table("pedidos").insert(lista_ins).execute()
                 st.success("Alterações consolidadas!")
                 st.rerun()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ROTA — PEDIDO POR FORNECEDOR (só FLV Normal/Ofertas) — impressão p/ WhatsApp
+    # ─────────────────────────────────────────────────────────────────────────
+    elif perfil_navegacao == "Pedido por Fornecedor":
+        st.markdown(f"<div class='no-print'><h2>🚚 Pedido por Fornecedor — {setor}</h2></div>", unsafe_allow_html=True)
+
+        if not setor_usa_iceasa(setor):
+            st.info("Esta visão é exclusiva do FLV Normal e FLV Ofertas.")
+            return
+
+        df_prod = carregar_produtos(setor).copy()
+        if df_prod.empty:
+            st.warning("Nenhum produto cadastrado neste setor.")
+            return
+        if 'codigo_iceasa' not in df_prod.columns:
+            df_prod['codigo_iceasa'] = None
+        df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
+
+        # Pedidos de hoje → quantidade por loja e total por produto
+        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+        df_ped = pd.DataFrame(resp_ped.data)
+        qtd_por_loja, total_por_cod = {}, {}
+        if not df_ped.empty:
+            for cod, grp in df_ped.groupby("codigo_produto"):
+                qtd_por_loja[int(cod)] = {int(r["loja"]): int(r["quantidade"]) for _, r in grp.iterrows()}
+                total_por_cod[int(cod)] = int(grp["quantidade"].sum())
+
+        # Preços do dia (da Separação)
+        df_extras = carregar_extras(setor, str(data_brasilia()))
+        preco_por_cod = dict(zip(df_extras["codigo_produto"], df_extras["preco"])) if not df_extras.empty else {}
+
+        desc_por_cod = dict(zip(df_prod["codigo"], df_prod["descricao"]))
+        iceasa_por_cod = dict(zip(df_prod["codigo"], df_prod["codigo_iceasa"]))
+
+        # Rótulos únicos p/ o multiselect (desc; acrescenta código se a desc repetir)
+        cont_desc = df_prod["descricao"].astype(str).value_counts()
+        def _label(cod):
+            d = str(desc_por_cod.get(cod, cod))
+            if cont_desc.get(d, 0) > 1:
+                ice = iceasa_por_cod.get(cod)
+                return f"{d} [{int(ice) if pd.notna(ice) else int(cod)}]"
+            return d
+        label_por_cod = {int(c): _label(int(c)) for c in df_prod["codigo"]}
+        cod_por_label = {v: k for k, v in label_por_cod.items()}
+        opcoes_labels = sorted(label_por_cod.values(), key=lambda s: s.lower())
+
+        # Config atual (fornecedor → produtos + flag de layout girado)
+        df_fp = carregar_fornecedores_pedido(setor)
+        config = {}
+        if not df_fp.empty:
+            for forn, grp in df_fp.sort_values(by=["fornecedor", "ordem"]).groupby("fornecedor", sort=False):
+                cods = [int(c) for c in grp.sort_values("ordem")["codigo_produto"].tolist() if int(c) in label_por_cod]
+                config[str(forn)] = {"codigos": cods, "linha": bool(grp["linha"].iloc[0])}
+
+        if not config:
+            st.info("Nenhum fornecedor cadastrado ainda. Rode o SQL de carga inicial no Supabase (ou adicione abaixo).")
+
+        ver_key = f"fp_ver_{setor}"
+        st.session_state.setdefault(ver_key, 0)
+        ver = st.session_state[ver_key]
+        extras_key = f"fp_extras_{setor}_{ver}"
+        st.session_state.setdefault(extras_key, [])
+        nomes_forn = list(config.keys()) + [n for n in st.session_state[extras_key] if n not in config]
+
+        def _preco(cod):
+            v = preco_por_cod.get(cod)
+            try:
+                return float(v) if v is not None and not (isinstance(v, float) and pd.isna(v)) else 0.0
+            except (ValueError, TypeError):
+                return 0.0
+
+        # Topo: adicionar fornecedor + salvar
+        st.markdown("<div class='no-print'>", unsafe_allow_html=True)
+        c_add, c_addbtn, c_save = st.columns([3, 1.2, 2])
+        with c_add:
+            novo_nome = st.text_input("➕ Novo fornecedor:", key=f"fp_novo_{setor}_{ver}", placeholder="Nome do fornecedor")
+        with c_addbtn:
+            st.write("")
+            if st.button("Adicionar", use_container_width=True, key=f"fp_addbtn_{setor}_{ver}"):
+                nn = str(novo_nome).strip()
+                if nn and nn not in nomes_forn:
+                    st.session_state[extras_key].append(nn)
+                    st.rerun()
+        with c_save:
+            st.write("")
+            btn_salvar_fp = st.button("💾 Salvar Fornecedores", type="primary", use_container_width=True, key=f"fp_save_{setor}_{ver}")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Render dos cards (2 colunas) — edição na tela; coleta o estado p/ salvar/imprimir
+        estado_ui, blocos_print = [], []
+        for i in range(0, len(nomes_forn), 2):
+            cols = st.columns(2, gap="small")
+            for j, forn in enumerate(nomes_forn[i:i + 2]):
+                cfg = config.get(forn, {"codigos": [], "linha": False})
+                with cols[j]:
+                    with st.container(border=True):
+                        st.markdown("<div class='no-print'>", unsafe_allow_html=True)
+                        nome_edit = st.text_input("Fornecedor", value=forn, key=f"fp_nome_{setor}_{ver}_{i+j}", label_visibility="collapsed")
+                        default_labels = [label_por_cod[c] for c in cfg["codigos"] if c in label_por_cod]
+                        sel_labels = st.multiselect("Produtos", options=opcoes_labels, default=default_labels, key=f"fp_prod_{setor}_{ver}_{i+j}", label_visibility="collapsed", placeholder="Produtos deste fornecedor")
+                        linha_edit = st.checkbox("Layout girado (lojas nas linhas)", value=cfg["linha"], key=f"fp_linha_{setor}_{ver}_{i+j}")
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                        nome_final = str(nome_edit).strip()
+                        cods_sel = [cod_por_label[l] for l in sel_labels if l in cod_por_label]
+                        estado_ui.append((nome_final, cods_sel, bool(linha_edit)))
+
+                        if not cods_sel:
+                            st.caption("Sem produtos selecionados.")
+                            continue
+
+                        if linha_edit:
+                            dados = {"Loja": [f"{n:02d}" for n in range(1, 9)] + ["TOTAL"]}
+                            for cod in cods_sel:
+                                desc = str(desc_por_cod.get(cod, cod))
+                                ice = iceasa_por_cod.get(cod)
+                                cab = f"{int(ice) if pd.notna(ice) else cod} - {' '.join(desc.split()[:2])}"
+                                dl = qtd_por_loja.get(cod, {})
+                                vals = [dl.get(n, 0) for n in range(1, 9)]
+                                vals.append(sum(vals))
+                                dados[cab] = vals
+                            df_card = pd.DataFrame(dados)
+                            st.dataframe(df_card, hide_index=True, use_container_width=True)
+                            blocos_print.append(f'<h4 class="supplier-header">🛒 {nome_final}</h4>' + df_card.to_html(index=False, classes="print-table"))
+                        else:
+                            linhas_n, soma_final = [], 0.0
+                            for cod in cods_sel:
+                                tot = total_por_cod.get(cod, 0)
+                                pre = _preco(cod)
+                                rtot = tot * pre
+                                soma_final += rtot
+                                ice = iceasa_por_cod.get(cod)
+                                linhas_n.append({
+                                    "Cód": iceasa_para_impressao(ice) if pd.notna(ice) else "",
+                                    "Produto": str(desc_por_cod.get(cod, cod)),
+                                    "Total": tot if tot > 0 else "",
+                                    "R$ Preço": (f"R$ {pre:.2f}".replace(".", ",")) if pre > 0 else "",
+                                    "R$ Total": (f"R$ {rtot:.2f}".replace(".", ",")) if rtot > 0 else "",
+                                })
+                            df_card = pd.DataFrame(linhas_n)
+                            st.dataframe(df_card, hide_index=True, use_container_width=True)
+                            tf_str = f"R$ {soma_final:.2f}".replace(".", ",")
+                            st.markdown(f"<div class='no-print' style='text-align:right;font-weight:700;color:#1f7a3d;'>Total Final: {tf_str}</div>", unsafe_allow_html=True)
+                            blocos_print.append(
+                                f'<h4 class="supplier-header">🛒 {nome_final}</h4>'
+                                + df_card.to_html(index=False, classes="print-table")
+                                + f'<div style="text-align:right;font-weight:bold;margin:2px 0 10px 0;">Total Final: {tf_str}</div>'
+                            )
+
+        # Bloco de impressão consolidado (fora das colunas, p/ não ser escondido na impressão)
+        if blocos_print:
+            corpo = "".join(f'<div style="page-break-inside:avoid;">{b}</div>' for b in blocos_print)
+            st.markdown(
+                f'<div class="print-only print-fornecedores"><h3>🚚 Pedido por Fornecedor — {setor}</h3>'
+                f'<div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{corpo}</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
+        c_print, _ = st.columns([1, 4])
+        with c_print:
+            injetar_botao_impressao()
+
+        if btn_salvar_fp:
+            with st.spinner("Salvando fornecedores..."):
+                supabase.table("fornecedores_pedido").delete().eq("setor", setor).execute()
+                linhas_ins = []
+                for nome, cods, linha in estado_ui:
+                    if not nome or not cods:
+                        continue
+                    for ordem, cod in enumerate(cods):
+                        linhas_ins.append({"setor": setor, "fornecedor": nome, "codigo_produto": int(cod), "linha": bool(linha), "ordem": ordem})
+                for k in range(0, len(linhas_ins), 1000):
+                    if linhas_ins[k:k + 1000]:
+                        supabase.table("fornecedores_pedido").insert(linhas_ins[k:k + 1000]).execute()
+            carregar_fornecedores_pedido.clear()
+            st.session_state[ver_key] = ver + 1   # reseta os widgets dos cards
+            st.success("✅ Fornecedores salvos!")
+            st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 4 — CATÁLOGO DE PRODUTOS
