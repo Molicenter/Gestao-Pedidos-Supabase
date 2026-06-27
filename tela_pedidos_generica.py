@@ -559,6 +559,14 @@ def iniciar_tela(setor: str):
         
         @media screen {
             .print-only { display: none !important; } 
+            /* 📐 Usa a largura cheia da tela — tabelas largas (Separação/Catálogo) cabem sem rolar */
+            [data-testid="stMainBlockContainer"],
+            [data-testid="stAppViewBlockContainer"],
+            .block-container {
+                max-width: 100% !important;
+                padding-left: 2rem !important;
+                padding-right: 2rem !important;
+            }
         }
         
         /* 🔥 CSS OTMIZADO PARA PREENCHIMENTO 100% NA IMPRESSÃO 🔥 */
