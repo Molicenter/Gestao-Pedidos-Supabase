@@ -82,9 +82,15 @@ def _normaliza_setor(setor) -> str:
     return s
 
 def setor_pedido_texto(setor) -> bool:
-    # Matéria Prima, Embalagem e Padaria/Confeitaria pedem em texto (fardo, cx, fd...).
+    # Matéria Prima, Embalagem(ns) e Padaria/Confeitaria pedem em texto (fardo, cx, fd...).
     # Esses 3 setores saem SEM Total em tudo (telas, Excel e impressão).
-    return any(k in _normaliza_setor(setor) for k in ("materia prima", "embalagem", "padaria", "confeitaria"))
+    # "embalag" pega tanto "Embalagem" quanto "Embalagens".
+    return any(k in _normaliza_setor(setor) for k in ("materia prima", "embalag", "padaria", "confeitaria"))
+
+def setor_usa_obs_loja(setor) -> bool:
+    # Embalagem(ns) e Padaria/Confeitaria têm campo "Observação Geral da Loja"
+    # (a loja escreve; o admin vê na Separação).
+    return any(k in _normaliza_setor(setor) for k in ("embalag", "padaria", "confeitaria"))
 
 def setor_eh_materia_prima(setor) -> bool:
     # Só a Matéria Prima ganha a coluna Observação — e apenas na exportação Excel.
@@ -142,7 +148,7 @@ def buscar_estoque_erp(loja_nome, codigos_erp, setor):
 # ─────────────────────────────────────────────────────────────────────────────
 # 📊 MOTORES DE EXPORTAÇÃO EXCEL CUSTOMIZADOS (OPENPYXL)
 # ─────────────────────────────────────────────────────────────────────────────
-def gerar_excel_download(df: pd.DataFrame, nome_aba: str, com_obs: bool = False) -> bytes:
+def gerar_excel_download(df: pd.DataFrame, nome_aba: str, com_obs: bool = False, obs_rodape: str = "") -> bytes:
     df_export = df.copy()
     df_export = df_export.rename(columns={
         "Cód. ERP": "Código",
@@ -252,6 +258,22 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str, com_obs: bool = False)
                 worksheet.column_dimensions[letra].width = 22
             else: 
                 worksheet.column_dimensions[letra].width = 9 
+
+        # 📝 Observação Geral da Loja: escrita abaixo da tabela (só no pedido da loja)
+        if obs_rodape and str(obs_rodape).strip():
+            ncols = max(1, len(df_export.columns))
+            r_lbl = worksheet.max_row + 2
+            c_lbl = worksheet.cell(row=r_lbl, column=1, value="📝 Observação Geral da Loja:")
+            c_lbl.font = font_bold
+            if ncols > 1:
+                worksheet.merge_cells(start_row=r_lbl, start_column=1, end_row=r_lbl, end_column=ncols)
+            r_txt = r_lbl + 1
+            c_txt = worksheet.cell(row=r_txt, column=1, value=str(obs_rodape).strip())
+            c_txt.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            c_txt.border = border_thin
+            if ncols > 1:
+                worksheet.merge_cells(start_row=r_txt, start_column=1, end_row=r_txt + 3, end_column=ncols)
+            worksheet.row_dimensions[r_txt].height = 60
 
         worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
@@ -612,6 +634,31 @@ def carregar_extras(setor: str, data_str: str) -> pd.DataFrame:
     resp = supabase.table("separacao_extras").select("codigo_produto, preco, observacao").eq("setor", setor).eq("data_pedido", data_str).execute()
     return pd.DataFrame(resp.data)
 
+def carregar_obs_loja(setor: str, num_loja: int, data_str: str) -> str:
+    # Observação Geral que a própria loja digita (embalagem/padaria/confeitaria). SEM cache.
+    supabase = obter_supabase()
+    resp = supabase.table("observacoes_lojas").select("observacao").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", data_str).execute()
+    if resp.data:
+        return (resp.data[0].get("observacao") or "")
+    return ""
+
+def carregar_obs_lojas_admin(setor: str, data_str: str) -> pd.DataFrame:
+    # Todas as observações das lojas do dia, p/ o admin ver na Separação. SEM cache.
+    supabase = obter_supabase()
+    resp = supabase.table("observacoes_lojas").select("loja, observacao").eq("setor", setor).eq("data_pedido", data_str).execute()
+    return pd.DataFrame(resp.data)
+
+def salvar_obs_loja(setor: str, num_loja: int, data_str: str, texto: str, usuario: str):
+    # Regrava a observação da loja (apaga e insere se houver texto). SEM cache.
+    supabase = obter_supabase()
+    supabase.table("observacoes_lojas").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", data_str).execute()
+    txt = (texto or "").strip()
+    if txt:
+        supabase.table("observacoes_lojas").insert({
+            "data_pedido": data_str, "setor": setor, "loja": num_loja,
+            "observacao": txt, "usuario": usuario
+        }).execute()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🛡️ PROTEÇÃO CONTRA PERDA DE DIGITAÇÃO (avisa antes de fechar/recarregar a aba)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -753,6 +800,16 @@ def iniciar_tela(setor: str):
                 color: #333 !important;
                 margin: -6px 0 8px 0 !important;
                 text-align: left !important;
+            }
+            
+            /* Observação Geral da Loja abaixo do pedido impresso */
+            .print-obs-loja {
+                margin-top: 10px !important;
+                padding: 6px 8px !important;
+                border: 1px solid #000 !important;
+                font-size: 9pt !important;
+                line-height: 1.3 !important;
+                page-break-inside: avoid !important;
             }
             
             /* Título do fornecedor grudado na tabela como um bloco contínuo */
@@ -980,6 +1037,7 @@ def iniciar_tela(setor: str):
                         with st.spinner("Limpando..."): 
                             supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
                             supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+                            supabase.table("observacoes_lojas").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
                         st.session_state['confirmar_limpeza'] = False
                         # reseta o editor p/ não ficar 'None' preso em células que foram apagadas
                         st.session_state.pop("editor_separacao", None)
@@ -1182,6 +1240,27 @@ def iniciar_tela(setor: str):
             st.session_state.pop("editor_separacao", None)
             st.rerun()
 
+        # 📝 Observações das Lojas (embalagem/padaria/confeitaria): o admin vê o recado de cada loja
+        if setor_usa_obs_loja(setor) and acesso_total:
+            df_obs = carregar_obs_lojas_admin(setor, str(data_brasilia()))
+            st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='no-print'><h3>📝 Observações das Lojas — {data_hora_brasilia()}</h3></div>", unsafe_allow_html=True)
+            if df_obs is not None and not df_obs.empty:
+                df_obs = df_obs.copy()
+                df_obs["Loja"] = df_obs["loja"].apply(lambda n: f"Loja {int(n):02d}")
+                df_obs = df_obs.rename(columns={"observacao": "Observação"})[["Loja", "Observação"]].sort_values("Loja")
+                st.dataframe(
+                    df_obs, hide_index=True, use_container_width=True,
+                    column_config={
+                        "Loja": st.column_config.TextColumn(width=90),
+                        "Observação": st.column_config.TextColumn(width=700),
+                    },
+                )
+                html_obs = df_obs.to_html(index=False, classes="print-table")
+                st.markdown(f'<div class="print-only"><h3>📝 Observações das Lojas</h3>{html_obs}</div>', unsafe_allow_html=True)
+            else:
+                st.info("Nenhuma loja registrou observação para hoje.")
+
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 2 — VISÃO DAS LOJAS
     # ─────────────────────────────────────────────────────────────────────────
@@ -1209,6 +1288,10 @@ def iniciar_tela(setor: str):
         resp_exis = supabase.table("pedidos").select("codigo_produto, quantidade").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
 
         df_exis = pd.DataFrame(resp_exis.data)
+
+        # 📝 Observação Geral da Loja — só embalagem/padaria/confeitaria
+        usa_obs = setor_usa_obs_loja(setor)
+        obs_atual = carregar_obs_loja(setor, num_loja, str(data_brasilia())) if usa_obs else ""
 
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
@@ -1289,21 +1372,38 @@ def iniciar_tela(setor: str):
                 column_config={"Média (90d)": st.column_config.NumberColumn(format="%.2f")},
             )
 
+        # 📝 Campo de Observação Geral da Loja (no final dos pedidos)
+        obs_loja = ""
+        if usa_obs:
+            st.markdown("<div class='no-print'></div>", unsafe_allow_html=True)
+            obs_loja = st.text_area(
+                "📝 Observação Geral da Loja",
+                value=obs_atual,
+                key=f"obs_loja_{setor}_{num_loja}",
+                placeholder="Ex.: 2 estiletes; 2 grampeadores; 2 sacos de enforca gato...",
+                help="Recados gerais desta loja para a separação (itens fora da lista, pedidos especiais etc.)."
+            )
+
         # 🛡️ ITEM 2 — guarda contra perder a digitação (compara original x editado)
         orig_q = df_filtrado["Qtde Pedida"].fillna("").astype(str).str.strip().tolist()
         edit_q = grid_editado["Qtde Pedida"].fillna("").astype(str).str.strip().tolist()
-        guardar_contra_saida(orig_q != edit_q)
+        obs_mudou = usa_obs and (obs_loja or "").strip() != (obs_atual or "").strip()
+        guardar_contra_saida((orig_q != edit_q) or obs_mudou)
 
         df_print_loja = df_filtrado.drop(columns=['codigo'], errors='ignore').fillna('').rename(columns={'Qtde Pedida': 'Pedido'})
         html_table = df_print_loja.to_html(index=False, classes="print-table")
-        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}</div>', unsafe_allow_html=True)
+        obs_html = ""
+        if usa_obs and (obs_loja or "").strip():
+            obs_fmt = (obs_loja or "").strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+            obs_html = f'<div class="print-obs-loja"><strong>📝 Observação Geral da Loja:</strong><br>{obs_fmt}</div>'
+        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
 
         c_salvar, c_excel, c_print = st.columns([2, 2, 1])
         with c_salvar: 
             btn_salvar_loja = st.button("💾 Salvar Pedido Oficial", type="primary", use_container_width=True)
         with c_excel:
             df_export = grid_editado.drop(columns=['codigo'], errors='ignore')
-            st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Pedido"), file_name=f"Pedido_{loja_selecionada}.xlsx", use_container_width=True)
+            st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Pedido", obs_rodape=(obs_loja if usa_obs else "")), file_name=f"Pedido_{loja_selecionada}.xlsx", use_container_width=True)
         with c_print: 
             injetar_botao_impressao()
 
@@ -1321,9 +1421,14 @@ def iniciar_tela(setor: str):
                     
                     if lista_ins: 
                         supabase.table("pedidos").insert(lista_ins).execute()
+
+                # 📝 grava a Observação Geral da Loja (embalagem/padaria/confeitaria)
+                if usa_obs:
+                    salvar_obs_loja(setor, num_loja, str(data_brasilia()), obs_loja, usuario_atual)
             st.success("Gravado!")
-            # limpa o estado do editor para o guarda de "não salvo" desligar
+            # limpa o estado dos editores para o guarda de "não salvo" desligar
             st.session_state.pop(f"grid_loja_{num_loja}", None)
+            st.session_state.pop(f"obs_loja_{setor}_{num_loja}", None)
             st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
