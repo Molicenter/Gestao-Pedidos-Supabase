@@ -75,13 +75,20 @@ def setor_usa_iceasa(setor) -> bool:
     # Cód. Iceasa só existe p/ FLV Normal e FLV Ofertas
     return str(setor).strip().lower() in ("flv normal", "flv ofertas")
 
-def setor_sem_total(setor) -> bool:
-    # Matéria Prima, Embalagem e Padaria/Confeitaria pedem em texto (fardo, cx, fd...),
-    # então somar Total não faz sentido. Esses setores saem SEM coluna Total e COM Observação.
+def _normaliza_setor(setor) -> str:
     s = str(setor).strip().lower()
     for a, b in (("á","a"),("é","e"),("í","i"),("ó","o"),("ú","u"),("â","a"),("ê","e"),("ô","o"),("ã","a"),("õ","o"),("ç","c")):
         s = s.replace(a, b)
-    return any(k in s for k in ("materia prima", "embalagem", "padaria", "confeitaria"))
+    return s
+
+def setor_pedido_texto(setor) -> bool:
+    # Matéria Prima, Embalagem e Padaria/Confeitaria pedem em texto (fardo, cx, fd...).
+    # Esses 3 setores saem SEM Total em tudo (telas, Excel e impressão).
+    return any(k in _normaliza_setor(setor) for k in ("materia prima", "embalagem", "padaria", "confeitaria"))
+
+def setor_eh_materia_prima(setor) -> bool:
+    # Só a Matéria Prima ganha a coluna Observação — e apenas na exportação Excel.
+    return "materia prima" in _normaliza_setor(setor)
 
 def iceasa_para_impressao(v) -> str:
     # Regra da impressão/Excel BOX: vazio se ausente OU acima de 9000; senão o número
@@ -135,7 +142,7 @@ def buscar_estoque_erp(loja_nome, codigos_erp, setor):
 # ─────────────────────────────────────────────────────────────────────────────
 # 📊 MOTORES DE EXPORTAÇÃO EXCEL CUSTOMIZADOS (OPENPYXL)
 # ─────────────────────────────────────────────────────────────────────────────
-def gerar_excel_download(df: pd.DataFrame, nome_aba: str, sem_total: bool = False) -> bytes:
+def gerar_excel_download(df: pd.DataFrame, nome_aba: str, com_obs: bool = False) -> bytes:
     df_export = df.copy()
     df_export = df_export.rename(columns={
         "Cód. ERP": "Código",
@@ -144,9 +151,8 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str, sem_total: bool = Fals
         "Estoque ERP": "Estoque"
     })
 
-    # Setores sem Total (matéria prima/embalagem/padaria): tira o Total e põe Observação manual
-    if sem_total:
-        df_export = df_export.drop(columns=[c for c in df_export.columns if "TOTAL" in str(c).upper()], errors="ignore")
+    # Observação manual: entra como última coluna (à direita do Total, se houver Total)
+    if com_obs:
         df_export["Observação:"] = ""
 
     def limpar_valor_excel(v):
@@ -261,7 +267,7 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str, sem_total: bool = Fals
 
     return output.getvalue()
 
-def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
+def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str, sem_total: bool = False, com_obs: bool = False) -> bytes:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         worksheet = writer.book.create_sheet(nome_aba[:30])
@@ -292,18 +298,31 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
             except ValueError:
                 return v_str
 
+        # Layout: lojas vão das colunas 3..10. Depois (opcional) Total e/ou Observação.
+        total_col = None if sem_total else 11
+        if com_obs:
+            obs_col = (total_col + 1) if total_col else 11
+        else:
+            obs_col = None
+        last_col = 10
+        for c in (total_col, obs_col):
+            if c:
+                last_col = max(last_col, c)
+
         worksheet.column_dimensions['A'].width = 12  
         worksheet.column_dimensions['B'].width = 45  
-        for col_idx in range(3, 12): 
+        for col_idx in range(3, last_col + 1): 
             worksheet.column_dimensions[get_column_letter(col_idx)].width = 9
+        if obs_col:
+            worksheet.column_dimensions[get_column_letter(obs_col)].width = 22
 
         hoje_str = data_brasilia().strftime("%d/%m/%Y")
         worksheet["A1"] = "Tipo"
         worksheet["B1"] = "Descrição"
         worksheet["C1"] = f"Pedidos do dia {hoje_str}"
-        worksheet.merge_cells("C1:K1") 
+        worksheet.merge_cells(start_row=1, start_column=3, end_row=1, end_column=last_col) 
         
-        for col_idx in range(1, 12):
+        for col_idx in range(1, last_col + 1):
             cell = worksheet.cell(row=1, column=col_idx)
             cell.fill = fill_header
             cell.font = font_header
@@ -323,9 +342,12 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
             for i, loja in enumerate(lojas_cols): 
                 worksheet.cell(row=current_row, column=3+i).value = loja
                 
-            worksheet.cell(row=current_row, column=11).value = "TOTAL"
+            if total_col:
+                worksheet.cell(row=current_row, column=total_col).value = "TOTAL"
+            if obs_col:
+                worksheet.cell(row=current_row, column=obs_col).value = "Observação"
             
-            for col_idx in range(1, 12):
+            for col_idx in range(1, last_col + 1):
                 cell = worksheet.cell(row=current_row, column=col_idx)
                 cell.fill = fill_header
                 cell.font = font_header
@@ -353,12 +375,18 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str) -> bytes:
                     if i % 2 == 0: 
                         c_loja.fill = fill_green
                 
-                c_total = worksheet.cell(row=current_row, column=11)
-                c_total.value = f'=IF(SUM(C{current_row}:J{current_row})>0, SUM(C{current_row}:J{current_row}), "")'
-                c_total.alignment = align_center
-                c_total.border = border_thin
-                c_total.font = font_bold
-                c_total.fill = fill_green
+                if total_col:
+                    c_total = worksheet.cell(row=current_row, column=total_col)
+                    c_total.value = f'=IF(SUM(C{current_row}:J{current_row})>0, SUM(C{current_row}:J{current_row}), "")'
+                    c_total.alignment = align_center
+                    c_total.border = border_thin
+                    c_total.font = font_bold
+                    c_total.fill = fill_green
+                if obs_col:
+                    c_obs = worksheet.cell(row=current_row, column=obs_col, value="")
+                    c_obs.alignment = align_left
+                    c_obs.border = border_thin
+                    c_obs.font = font_normal
                 current_row += 1
                 
         if 'Sheet' in writer.book.sheetnames: 
@@ -1042,7 +1070,7 @@ def iniciar_tela(setor: str):
         df_consolidado = df_consolidado.rename(columns={'codigo_erp': 'Cód. ERP', 'codigo_iceasa': 'Cód. Iceasa', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
 
         usa_iceasa = setor_usa_iceasa(setor)
-        sem_total = setor_sem_total(setor)
+        texto_setor = setor_pedido_texto(setor)
         cols_cod = ["Cód. ERP", "Cód. Iceasa"] if usa_iceasa else ["Cód. ERP"]
         if usa_iceasa and "Cód. Iceasa" not in df_consolidado.columns:
             df_consolidado["Cód. Iceasa"] = None
@@ -1058,7 +1086,8 @@ def iniciar_tela(setor: str):
             cols_extras = ["R$ Preço", "Observação"]
 
         # Matéria Prima/Embalagem/Padaria: sem coluna Total (pedem em texto)
-        cols_total = [] if sem_total else ["TOTAL GERAL"]
+        # Matéria Prima/Embalagem/Padaria: sem coluna Total em tudo (tela, Excel e impressão)
+        cols_total = [] if texto_setor else ["TOTAL GERAL"]
         df_exibicao = df_consolidado[["Fornecedor", "codigo"] + cols_cod + ["Descrição"] + LOJAS_NOMES + cols_total + cols_extras].sort_values(by=['Fornecedor', 'Descrição'])
 
         col_cfg = {
@@ -1099,8 +1128,6 @@ def iniciar_tela(setor: str):
         if usa_iceasa:
             df_print_sep['Cód. Iceasa'] = df_print_sep['Cód. Iceasa'].apply(iceasa_para_impressao)
             df_print_sep = df_print_sep.drop(columns=['Cód. ERP'], errors='ignore')
-        if sem_total:
-            df_print_sep["Observação:"] = ""   # coluna p/ anotação manual (igual ao modelo antigo)
         html_table = df_print_sep.to_html(index=False, classes="print-table")
         st.markdown(f'<div class="print-only"><h3>📊 Separação e Fechamento — {setor} ({filtro_selecionado})</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}</div>', unsafe_allow_html=True)
 
@@ -1114,7 +1141,7 @@ def iniciar_tela(setor: str):
                 excel_bytes = gerar_excel_box(df_export)
                 nome_arq = "molicenter.xlsx"
             else:
-                excel_bytes = gerar_excel_download(df_export, f"Fechamento {setor}", sem_total=sem_total)
+                excel_bytes = gerar_excel_download(df_export, f"Fechamento {setor}", com_obs=setor_eh_materia_prima(setor))
                 nome_arq = f"Separacao_Fechamento_{setor}.xlsx"
             st.download_button("📊 Exportar Excel", data=excel_bytes, file_name=nome_arq, use_container_width=True)
         with c_print: 
@@ -1368,13 +1395,15 @@ def iniciar_tela(setor: str):
         all_edited_frames = []
 
         usa_iceasa = setor_usa_iceasa(setor)
+        texto_setor = setor_pedido_texto(setor)   # Matéria Prima/Embalagem/Padaria: sem Total na tela
         for forn in sorted(df_mestre["fornecedor"].dropna().unique()):
             df_forn_bruto = df_mestre[df_mestre["fornecedor"] == forn]
             lojas_ativas = [l for l in LOJAS_NOMES if not (df_forn_bruto[l] == "-").all()]
             cols_cod_f = ["codigo_erp", "codigo_iceasa"] if usa_iceasa else ["codigo_erp"]
             if usa_iceasa and "codigo_iceasa" not in df_forn_bruto.columns:
                 df_forn_bruto = df_forn_bruto.assign(codigo_iceasa=None)
-            df_forn_view = df_forn_bruto[["codigo"] + cols_cod_f + ["descricao"] + lojas_ativas + ["TOTAL GERAL"]].rename(columns={'codigo_erp': 'Cód. ERP', 'codigo_iceasa': 'Cód. Iceasa', 'descricao': 'Produto'}).sort_values(by='Produto')
+            cols_total_f = [] if texto_setor else ["TOTAL GERAL"]
+            df_forn_view = df_forn_bruto[["codigo"] + cols_cod_f + ["descricao"] + lojas_ativas + cols_total_f].rename(columns={'codigo_erp': 'Cód. ERP', 'codigo_iceasa': 'Cód. Iceasa', 'descricao': 'Produto'}).sort_values(by='Produto')
             
             with st.container(border=True):
                 st.markdown(f"<div class='no-print'><h5>Fornecedor: {forn}</h5></div>", unsafe_allow_html=True)
@@ -1414,7 +1443,7 @@ def iniciar_tela(setor: str):
                 btn_salvar_forn = st.button("💾 Salvar Ajustes do Resumo", type="primary", use_container_width=True)
             with c_excel:
                 df_export = df_forn_editado_full.drop(columns=['codigo'], errors='ignore')
-                st.download_button("📊 Exportar Fornecedores", data=gerar_excel_fornecedores(df_export, f"Fornecedores"), file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
+                st.download_button("📊 Exportar Fornecedores", data=gerar_excel_fornecedores(df_export, f"Fornecedores", sem_total=texto_setor, com_obs=setor_eh_materia_prima(setor)), file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
             with c_print: 
                 injetar_botao_impressao()
 
