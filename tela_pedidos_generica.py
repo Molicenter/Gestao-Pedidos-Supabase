@@ -92,6 +92,32 @@ def setor_usa_obs_loja(setor) -> bool:
     # (a loja escreve; o admin vê na Separação).
     return any(k in _normaliza_setor(setor) for k in ("embalag", "padaria", "confeitaria"))
 
+# Views de média no ERP (período base de 90 dias)
+VIEWS_MEDIA = {
+    "Média Semanal": "python_90dSEMANA",
+    "Diária": "python_90dDIARIA",
+    "Seg-Ter": "python_90dSEGTER",
+    "Qua-Qui": "python_90dQUAQUI",
+    "Sex-Sab-Dom": "python_90dSEXSABDOM",
+}
+
+def setor_usa_media(setor) -> bool:
+    # Embalagem/Padaria/Confeitaria/Matéria Prima NÃO usam a coluna Média na Visão das Lojas.
+    return not setor_pedido_texto(setor)
+
+def filtro_media_padrao(setor) -> str:
+    # Filtro de média já pré-selecionado por setor (o admin ainda pode trocar).
+    s = _normaliza_setor(setor)
+    if "folhagem" in s:
+        return "Diária"
+    if "flv normal" in s:
+        # Quinta-feira (pedido p/ Sex-Sáb-Dom) → Sex-Sab-Dom; demais dias (inclui terça) → Qua-Qui
+        return "Sex-Sab-Dom" if data_brasilia().weekday() == 3 else "Qua-Qui"
+    if "flv oferta" in s:
+        return "Seg-Ter"
+    # FLV Oriental, Açougue (Adriano/Pioneiro/BF/Paraná) e demais → Média Semanal
+    return "Média Semanal"
+
 def setor_eh_materia_prima(setor) -> bool:
     # Só a Matéria Prima ganha a coluna Observação — e apenas na exportação Excel.
     return "materia prima" in _normaliza_setor(setor)
@@ -627,6 +653,42 @@ def carregar_medias(num_loja: int) -> pd.DataFrame:
     resp = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
     return pd.DataFrame(resp.data)
 
+def sincronizar_medias_setor(setor: str, view_sql: str) -> tuple:
+    # Puxa a média do período (view do ERP) e regrava medias_90d p/ os produtos do setor.
+    # Reutilizada pelo botão "Puxar Médias do ERP" e pela atualização automática ao abrir a loja.
+    # Retorna (sucesso: bool, qtd: int, msg: str).
+    supabase = obter_supabase()
+    resp_prod = supabase.table("produtos").select("codigo, codigo_erp").eq("setor", setor).execute()
+    df_prod_map = pd.DataFrame(resp_prod.data)
+    if df_prod_map.empty:
+        return (False, 0, "Nenhum produto cadastrado neste setor.")
+    df_prod_map = df_prod_map.rename(columns={'codigo': 'codigo_pk_interna'})
+    if 'codigo_erp' not in df_prod_map.columns:
+        df_prod_map['codigo_erp'] = df_prod_map['codigo_pk_interna']
+    df_prod_map['codigo_erp'] = df_prod_map['codigo_erp'].fillna(df_prod_map['codigo_pk_interna']).astype(int)
+    codigos_erp_setor = df_prod_map['codigo_erp'].unique().tolist()
+    df_erp = conn_pg.query(f'SELECT * FROM "{view_sql}"', ttl=0)
+    if df_erp.empty:
+        return (False, 0, "View do ERP retornou vazia.")
+    c_loja, c_cod_erp, c_med = df_erp.columns[0], df_erp.columns[1], df_erp.columns[2]
+    df_erp_setor = df_erp[df_erp[c_cod_erp].isin(codigos_erp_setor)]
+    if df_erp_setor.empty:
+        return (False, 0, "View vazia para estes produtos.")
+    df_merged = pd.merge(df_erp_setor, df_prod_map, left_on=c_cod_erp, right_on='codigo_erp', how='inner')
+    codigos_pks = df_merged['codigo_pk_interna'].unique().tolist()
+    for i in range(0, len(codigos_pks), 200):
+        supabase.table("medias_90d").delete().in_("codigo_produto", codigos_pks[i:i+200]).execute()
+    lista_insert = []
+    for _, row in df_merged.iterrows():
+        lista_insert.append({
+            "loja": int(row[c_loja]),
+            "codigo_produto": int(row['codigo_pk_interna']),
+            "media_dia": float(row[c_med]) if pd.notna(row[c_med]) else 0.0
+        })
+    for i in range(0, len(lista_insert), 1000):
+        supabase.table("medias_90d").insert(lista_insert[i:i+1000]).execute()
+    return (True, len(lista_insert), "ok")
+
 def carregar_extras(setor: str, data_str: str) -> pd.DataFrame:
     # Preço/observação do dia (preenchidos manualmente na Separação). SEM cache, pois
     # mudam quando o comprador digita e salva — precisa refletir na hora.
@@ -961,63 +1023,24 @@ def iniciar_tela(setor: str):
             st.markdown("---")
             st.markdown("🔄 **Atualizar Médias (90d)**")
             
-            dict_views = {
-                "Média Semanal": "python_90dSEMANA", 
-                "Diária": "python_90dDIARIA",
-                "Seg-Ter": "python_90dSEGTER", 
-                "Qua-Qui": "python_90dQUAQUI", 
-                "Sex-Sab-Dom": "python_90dSEXSABDOM"
-            }
-            view_escolhida = st.selectbox("Selecione o período base:", list(dict_views.keys()), label_visibility="collapsed")
+            opcoes_views = list(VIEWS_MEDIA.keys())
+            # pré-seleciona o filtro padrão do setor (o admin ainda pode trocar)
+            filtro_padrao = filtro_media_padrao(setor)
+            idx_padrao = opcoes_views.index(filtro_padrao) if filtro_padrao in opcoes_views else 0
+            view_escolhida = st.selectbox("Selecione o período base:", opcoes_views, index=idx_padrao, label_visibility="collapsed")
             
             if st.button("📥 Puxar Médias do ERP", type="secondary", use_container_width=True):
-                view_sql = dict_views[view_escolhida]
+                view_sql = VIEWS_MEDIA[view_escolhida]
                 with st.spinner(f"Sincronizando {view_sql}..."):
                     try:
-                        resp_prod = supabase.table("produtos").select("codigo, codigo_erp").eq("setor", setor).execute()
-                        df_prod_map = pd.DataFrame(resp_prod.data)
-                        
-                        if df_prod_map.empty: 
-                            st.warning("Nenhum produto cadastrado neste setor.")
+                        ok, qtd, msg = sincronizar_medias_setor(setor, view_sql)
+                        if ok:
+                            st.success(f"Médias ({view_escolhida}) sincronizadas!")
+                            st.cache_data.clear()  # médias mudaram → recarrega na hora
+                            time.sleep(1.5)
+                            st.rerun()
                         else:
-                            df_prod_map = df_prod_map.rename(columns={'codigo': 'codigo_pk_interna'})
-                            if 'codigo_erp' not in df_prod_map.columns: 
-                                df_prod_map['codigo_erp'] = df_prod_map['codigo_pk_interna']
-                            df_prod_map['codigo_erp'] = df_prod_map['codigo_erp'].fillna(df_prod_map['codigo_pk_interna']).astype(int)
-                            
-                            codigos_erp_setor = df_prod_map['codigo_erp'].unique().tolist()
-                            df_erp = conn_pg.query(f'SELECT * FROM "{view_sql}"', ttl=0)
-                            
-                            if not df_erp.empty:
-                                c_loja, c_cod_erp, c_med = df_erp.columns[0], df_erp.columns[1], df_erp.columns[2]
-                                df_erp_setor = df_erp[df_erp[c_cod_erp].isin(codigos_erp_setor)]
-                                
-                                if df_erp_setor.empty: 
-                                    st.info("View vazia para estes produtos.")
-                                else:
-                                    df_merged = pd.merge(df_erp_setor, df_prod_map, left_on=c_cod_erp, right_on='codigo_erp', how='inner')
-                                    codigos_pks = df_merged['codigo_pk_interna'].unique().tolist()
-                                    
-                                    for i in range(0, len(codigos_pks), 200): 
-                                        supabase.table("medias_90d").delete().in_("codigo_produto", codigos_pks[i:i+200]).execute()
-                                    
-                                    lista_insert = []
-                                    for _, row in df_merged.iterrows():
-                                        lista_insert.append({
-                                            "loja": int(row[c_loja]), 
-                                            "codigo_produto": int(row['codigo_pk_interna']), 
-                                            "media_dia": float(row[c_med]) if pd.notna(row[c_med]) else 0.0
-                                        })
-                                        
-                                    for i in range(0, len(lista_insert), 1000): 
-                                        supabase.table("medias_90d").insert(lista_insert[i:i+1000]).execute()
-                                        
-                                    st.success(f"Médias ({view_escolhida}) sincronizadas!")
-                                    st.cache_data.clear()  # médias mudaram → recarrega na hora
-                                    time.sleep(1.5)
-                                    st.rerun()
-                            else: 
-                                st.warning("View do ERP retornou vazia.")
+                            st.warning(msg)
                     except Exception as e: 
                         st.error(f"Erro na sincronização: {e}")
 
@@ -1267,6 +1290,7 @@ def iniciar_tela(setor: str):
     elif perfil_navegacao == "Visão das Lojas":
         loja_selecionada = st.selectbox("👁️ Visualizar como:", LOJAS_NOMES) if acesso_total else usuario_atual
         num_loja = int(loja_selecionada.split()[-1])
+        usa_media = setor_usa_media(setor)
 
         st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
@@ -1284,6 +1308,21 @@ def iniciar_tela(setor: str):
         codigos_setor = df_prod['codigo'].tolist()
         df_perm = buscar_permissoes_setor(supabase, codigos_setor, num_loja)
         
+        # 🔄 Médias automáticas: ao abrir a loja já traz a média do filtro padrão do setor
+        # (1x por sessão por setor+filtro; o admin ainda pode trocar/puxar manualmente na lateral).
+        if acesso_total and usa_media:
+            filtro_pad = filtro_media_padrao(setor)
+            flag_med = f"med_auto_{setor}_{filtro_pad}"
+            if not st.session_state.get(flag_med):
+                try:
+                    with st.spinner(f"Atualizando médias ({filtro_pad})..."):
+                        ok_auto, _, _ = sincronizar_medias_setor(setor, VIEWS_MEDIA[filtro_pad])
+                    if ok_auto:
+                        carregar_medias.clear()
+                except Exception:
+                    pass  # ERP indisponível → segue com as médias já armazenadas
+                st.session_state[flag_med] = True
+
         df_med = carregar_medias(num_loja).copy()
         resp_exis = supabase.table("pedidos").select("codigo_produto, quantidade").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
 
@@ -1337,6 +1376,10 @@ def iniciar_tela(setor: str):
             'Qtde Pedida': df_loja['quantidade']
         }).sort_values(by=['Fornecedor', 'Descrição'])
 
+        # Embalagem/Padaria/Confeitaria/Matéria Prima: sem a coluna Média na Visão das Lojas
+        if not usa_media:
+            df_final_grid = df_final_grid.drop(columns=['Média (90d)'], errors='ignore')
+
         texto_busca = st.text_input("🔍 Buscar Produto (por Código ou Nome):")
         if texto_busca:
             tb = texto_busca.lower().strip()
@@ -1359,18 +1402,20 @@ def iniciar_tela(setor: str):
 
         # ⚠️ ITEM 3 — alerta de pedido muito acima da média (10x). grid_editado já traz
         # os valores digitados (mesmo antes de salvar), então o alerta atualiza na hora.
-        df_check = grid_editado.copy()
-        df_check["_q"] = df_check["Qtde Pedida"].apply(converter_para_int_seguro)
-        df_check["_m"] = pd.to_numeric(df_check["Média (90d)"], errors="coerce").fillna(0.0)
-        # só sinaliza quando há média (>0) — produto novo sem histórico não dá pra julgar
-        df_outliers = df_check[(df_check["_m"] > 0) & (df_check["_q"] > 10 * df_check["_m"])]
-        if not df_outliers.empty:
-            st.warning(f"⚠️ **{len(df_outliers)} item(ns) com pedido acima de 10x a média.** Confira se não há erro de digitação:")
-            st.dataframe(
-                df_outliers[["Cód. ERP", "Descrição", "Média (90d)", "Qtde Pedida"]].rename(columns={"Qtde Pedida": "Pedido"}),
-                hide_index=True, use_container_width=True,
-                column_config={"Média (90d)": st.column_config.NumberColumn(format="%.2f")},
-            )
+        # Só faz sentido onde existe a coluna Média.
+        if usa_media:
+            df_check = grid_editado.copy()
+            df_check["_q"] = df_check["Qtde Pedida"].apply(converter_para_int_seguro)
+            df_check["_m"] = pd.to_numeric(df_check["Média (90d)"], errors="coerce").fillna(0.0)
+            # só sinaliza quando há média (>0) — produto novo sem histórico não dá pra julgar
+            df_outliers = df_check[(df_check["_m"] > 0) & (df_check["_q"] > 10 * df_check["_m"])]
+            if not df_outliers.empty:
+                st.warning(f"⚠️ **{len(df_outliers)} item(ns) com pedido acima de 10x a média.** Confira se não há erro de digitação:")
+                st.dataframe(
+                    df_outliers[["Cód. ERP", "Descrição", "Média (90d)", "Qtde Pedida"]].rename(columns={"Qtde Pedida": "Pedido"}),
+                    hide_index=True, use_container_width=True,
+                    column_config={"Média (90d)": st.column_config.NumberColumn(format="%.2f")},
+                )
 
         # 📝 Campo de Observação Geral da Loja (no final dos pedidos)
         obs_loja = ""
