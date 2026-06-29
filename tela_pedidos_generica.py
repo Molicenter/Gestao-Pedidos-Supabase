@@ -1491,20 +1491,19 @@ def iniciar_tela(setor: str):
             obs_html = f'<div class="print-obs-loja"><strong>📝 Observação Geral da Loja:</strong><br>{obs_fmt}</div>'
         st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
 
-        c_salvar, c_excel, c_print = st.columns([2, 2, 1])
+        # Linha de botões. No Açougue Adriano/Especiais entra o "Sem Pedido Hoje"
+        # (menor) entre Salvar e Exportar; nos demais setores a linha fica como antes.
+        chave_confirma = f"confirmar_sem_pedido_{setor}_{num_loja}"
+        if usa_sem_pedido:
+            c_salvar, c_sem, c_excel, c_print = st.columns([2, 1.5, 2, 1])
+        else:
+            c_salvar, c_excel, c_print = st.columns([2, 2, 1])
+            c_sem = None
+
         with c_salvar: 
             btn_salvar_loja = st.button("💾 Salvar Pedido Oficial", type="primary", use_container_width=True)
-        with c_excel:
-            df_export = grid_editado.drop(columns=['codigo'], errors='ignore')
-            st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Pedido", obs_rodape=(obs_loja if usa_obs else "")), file_name=f"Pedido_{loja_selecionada}.xlsx", use_container_width=True)
-        with c_print: 
-            injetar_botao_impressao()
-
-        # 🚫 "Sem Pedido Hoje" — só Açougue Adriano e Pioneiro+BF+Paraná (Açougue Especiais).
-        # Zera o pedido da loja no dia e dispara o aviso no Telegram, com confirmação em 1 passo.
-        if usa_sem_pedido:
-            chave_confirma = f"confirmar_sem_pedido_{setor}_{num_loja}"
-            if not st.session_state.get(chave_confirma):
+        if c_sem is not None:
+            with c_sem:
                 if st.button(
                     "🚫 Sem Pedido Hoje",
                     use_container_width=True,
@@ -1512,31 +1511,39 @@ def iniciar_tela(setor: str):
                 ):
                     st.session_state[chave_confirma] = True
                     st.rerun()
-            else:
-                st.warning(
-                    f"⚠️ Confirma que a **{loja_selecionada}** **NÃO** fará pedido hoje? "
-                    "Isso apaga o que estiver lançado e avisa o supervisor no Telegram."
-                )
-                c_sp_sim, c_sp_nao = st.columns(2)
-                with c_sp_sim:
-                    if st.button("✔️ Sim, sem pedido hoje", type="primary", use_container_width=True, key=f"sp_sim_{setor}_{num_loja}"):
-                        with st.spinner("Registrando 'Sem Pedido Hoje'..."):
-                            supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
-                            msg_aviso = (
-                                f"🚨 AVISO - {setor}\n"
-                                f"A {loja_selecionada} informou que NÃO fará pedido hoje "
-                                f"({data_hora_brasilia()})."
-                            )
-                            enviado = notificar_telegram(msg_aviso)
-                        st.session_state[f"sem_pedido_msg_{setor}_{num_loja}"] = "ok" if enviado else "parcial"
-                        st.session_state[chave_confirma] = False
-                        # limpa o editor para a tela voltar zerada após o rerun
-                        st.session_state.pop(f"grid_loja_{num_loja}", None)
-                        st.rerun()
-                with c_sp_nao:
-                    if st.button("❌ Cancelar", use_container_width=True, key=f"sp_nao_{setor}_{num_loja}"):
-                        st.session_state[chave_confirma] = False
-                        st.rerun()
+        with c_excel:
+            df_export = grid_editado.drop(columns=['codigo'], errors='ignore')
+            st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Pedido", obs_rodape=(obs_loja if usa_obs else "")), file_name=f"Pedido_{loja_selecionada}.xlsx", use_container_width=True)
+        with c_print: 
+            injetar_botao_impressao()
+
+        # 🚫 Confirmação do "Sem Pedido Hoje" — aparece abaixo da linha quando o botão é clicado.
+        # Só no "Sim" é que zera o pedido da loja no dia e dispara o aviso no Telegram.
+        if usa_sem_pedido and st.session_state.get(chave_confirma):
+            st.warning(
+                f"⚠️ Confirma que a **{loja_selecionada}** **NÃO** fará pedido hoje? "
+                "Isso apaga o que estiver lançado e avisa o supervisor no Telegram."
+            )
+            c_sp_sim, c_sp_nao = st.columns(2)
+            with c_sp_sim:
+                if st.button("✔️ Sim, sem pedido hoje", type="primary", use_container_width=True, key=f"sp_sim_{setor}_{num_loja}"):
+                    with st.spinner("Registrando 'Sem Pedido Hoje'..."):
+                        supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
+                        msg_aviso = (
+                            f"🚨 AVISO - {setor}\n"
+                            f"A {loja_selecionada} informou que NÃO fará pedido hoje "
+                            f"({data_hora_brasilia()})."
+                        )
+                        enviado = notificar_telegram(msg_aviso)
+                    st.session_state[f"sem_pedido_msg_{setor}_{num_loja}"] = "ok" if enviado else "parcial"
+                    st.session_state[chave_confirma] = False
+                    # limpa o editor para a tela voltar zerada após o rerun
+                    st.session_state.pop(f"grid_loja_{num_loja}", None)
+                    st.rerun()
+            with c_sp_nao:
+                if st.button("❌ Cancelar", use_container_width=True, key=f"sp_nao_{setor}_{num_loja}"):
+                    st.session_state[chave_confirma] = False
+                    st.rerun()
 
         if btn_salvar_loja:
             with st.spinner("Gravando pedido..."):
