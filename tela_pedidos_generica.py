@@ -1220,9 +1220,15 @@ def iniciar_tela(setor: str):
         df_consolidado = df_consolidado.rename(columns={'codigo_erp': 'Cód. ERP', 'codigo_iceasa': 'Cód. Iceasa', 'descricao': 'Descrição', 'fornecedor': 'Fornecedor'})
 
         usa_iceasa = setor_usa_iceasa(setor)
+        usa_erp = setor_usa_erp(setor)
         texto_setor = setor_pedido_texto(setor)
         eh_mp = setor_eh_materia_prima(setor)
-        cols_cod = ["Cód. ERP", "Cód. Iceasa"] if usa_iceasa else ["Cód. ERP"]
+        if usa_iceasa:
+            cols_cod = ["Cód. ERP", "Cód. Iceasa"]
+        elif usa_erp:
+            cols_cod = ["Cód. ERP"]
+        else:
+            cols_cod = []   # Peças Açougue - Manoel: sem código ERP
         if usa_iceasa and "Cód. Iceasa" not in df_consolidado.columns:
             df_consolidado["Cód. Iceasa"] = None
 
@@ -1376,7 +1382,7 @@ def iniciar_tela(setor: str):
         elif _msg_sp == "parcial":
             st.warning("⚠️ O pedido foi zerado, mas falhou ao enviar o aviso no Telegram.")
 
-        st.markdown(f"<div class='no-print'><h2>📦 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
         df_prod = carregar_produtos(setor, somente_ativos=True).copy()
 
@@ -1469,14 +1475,16 @@ def iniciar_tela(setor: str):
         if not usa_media:
             df_final_grid = df_final_grid.drop(columns=['Média (90d)'], errors='ignore')
 
-        # Peças Açougue - Manoel: sem Estoque ERP (não há ERP para este setor)
+        # Peças Açougue - Manoel: sem Estoque ERP nem Cód. ERP (não há ERP para este setor)
         if not usa_erp:
-            df_final_grid = df_final_grid.drop(columns=['Estoque ERP'], errors='ignore')
+            df_final_grid = df_final_grid.drop(columns=['Estoque ERP', 'Cód. ERP'], errors='ignore')
 
         texto_busca = st.text_input("🔍 Buscar Produto (por Código ou Nome):")
         if texto_busca:
             tb = texto_busca.lower().strip()
-            mask = df_final_grid['Descrição'].str.lower().str.contains(tb, na=False) | df_final_grid['Cód. ERP'].astype(str).str.contains(tb, na=False)
+            mask = df_final_grid['Descrição'].str.lower().str.contains(tb, na=False)
+            if 'Cód. ERP' in df_final_grid.columns:
+                mask = mask | df_final_grid['Cód. ERP'].astype(str).str.contains(tb, na=False)
             df_filtrado = df_final_grid[mask]
         else:
             df_filtrado = df_final_grid
@@ -1534,7 +1542,7 @@ def iniciar_tela(setor: str):
         if usa_obs and (obs_loja or "").strip():
             obs_fmt = (obs_loja or "").strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
             obs_html = f'<div class="print-obs-loja"><strong>📝 Observação Geral da Loja:</strong><br>{obs_fmt}</div>'
-        st.markdown(f'<div class="print-only print-lojas"><h3>📦 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
 
         # Linha de botões. No Açougue Adriano/Especiais entra o "Sem Pedido Hoje"
         # (menor) entre Salvar e Exportar; nos demais setores a linha fica como antes.
@@ -1655,6 +1663,7 @@ def iniciar_tela(setor: str):
         all_edited_frames = []
 
         usa_iceasa = setor_usa_iceasa(setor)
+        usa_erp = setor_usa_erp(setor)
         texto_setor = setor_pedido_texto(setor)   # Matéria Prima/Embalagem/Padaria: sem Total na tela
         eh_mp = setor_eh_materia_prima(setor)
         mapa_obs_mp = {}
@@ -1665,7 +1674,12 @@ def iniciar_tela(setor: str):
         for forn in sorted(df_mestre["fornecedor"].dropna().unique()):
             df_forn_bruto = df_mestre[df_mestre["fornecedor"] == forn]
             lojas_ativas = [l for l in LOJAS_NOMES if not (df_forn_bruto[l] == "-").all()]
-            cols_cod_f = ["codigo_erp", "codigo_iceasa"] if usa_iceasa else ["codigo_erp"]
+            if usa_iceasa:
+                cols_cod_f = ["codigo_erp", "codigo_iceasa"]
+            elif usa_erp:
+                cols_cod_f = ["codigo_erp"]
+            else:
+                cols_cod_f = []   # Peças Açougue - Manoel: sem código ERP
             if usa_iceasa and "codigo_iceasa" not in df_forn_bruto.columns:
                 df_forn_bruto = df_forn_bruto.assign(codigo_iceasa=None)
             cols_total_f = [] if texto_setor else ["TOTAL GERAL"]
