@@ -234,6 +234,37 @@ if st.session_state['usuario_logado'] is None:
             usuarios_permitidos = ["Selecione...", "Administrador"] + LOJAS_LOGIN
             usuario_selecionado = st.selectbox("👤 Usuário de acesso:", usuarios_permitidos)
             senha_digitada = st.text_input("🔑 Senha de acesso:", type="password", autocomplete="off")
+
+            # ─────────────────────────────────────────────────────────────────
+            # 🔧 CORREÇÃO DO AUTOFILL DA SENHA
+            # Quando o navegador preenche a senha salva, ele NÃO dispara o evento
+            # que o Streamlit escuta — então o Python recebia a senha vazia e o
+            # botão "Entrar" não fazia nada (só funcionava ao redigitar).
+            # Este script força esse evento uma única vez por campo, fazendo o
+            # Streamlit registrar a senha preenchida automaticamente.
+            # ─────────────────────────────────────────────────────────────────
+            st.components.v1.html(
+                """
+                <script>
+                (function(){
+                  const win = window.parent, doc = win.document;
+                  const t = setInterval(function(){
+                    doc.querySelectorAll('input[type="password"]').forEach(function(inp){
+                      if (inp.value && !inp.dataset.__synced) {
+                        inp.dataset.__synced = '1';
+                        const setter = Object.getOwnPropertyDescriptor(
+                            win.HTMLInputElement.prototype, 'value').set;
+                        setter.call(inp, inp.value);                 // valor preenchido pelo navegador
+                        inp.dispatchEvent(new Event('input', { bubbles: true })); // Streamlit registra
+                      }
+                    });
+                  }, 250);
+                  setTimeout(function(){ clearInterval(t); }, 5000); // para após ~5s
+                })();
+                </script>
+                """,
+                height=0,
+            )
             
             st.write("<br>", unsafe_allow_html=True)
 
@@ -248,6 +279,9 @@ if st.session_state['usuario_logado'] is None:
                     st.rerun()
                 elif senha_digitada:
                     st.error("⚠️ Senha incorreta. Tente novamente.")
+                else:
+                    # Rede de segurança: senha veio vazia (ex.: autofill não captado)
+                    st.warning("⚠️ Digite a senha. Se ela foi preenchida automaticamente pelo navegador, clique no campo e tecle uma vez antes de entrar.")
             
             st.write("<br>", unsafe_allow_html=True)
     st.stop()
