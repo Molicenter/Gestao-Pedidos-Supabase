@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import time
+import requests
 from datetime import date, datetime, timezone, timedelta
 from supabase import create_client, Client
 
@@ -91,6 +92,11 @@ def setor_usa_obs_loja(setor) -> bool:
     # Embalagem(ns) e Padaria/Confeitaria têm campo "Observação Geral da Loja"
     # (a loja escreve; o admin vê na Separação).
     return any(k in _normaliza_setor(setor) for k in ("embalag", "padaria", "confeitaria"))
+
+def setor_usa_sem_pedido(setor) -> bool:
+    # Botão "Sem Pedido Hoje" (zera o pedido da loja + avisa no Telegram) só aparece
+    # no Açougue Adriano e no Pioneiro+BF+Paraná (que no Supabase é "Açougue Especiais").
+    return _normaliza_setor(setor) in ("acougue adriano", "acougue especiais")
 
 # Views de média no ERP (período base de 90 dias)
 VIEWS_MEDIA = {
@@ -579,6 +585,25 @@ def gerar_excel_box(df: pd.DataFrame) -> bytes:
 # ─────────────────────────────────────────────────────────────────────────────
 # 🖨️ OUTROS UTILS DA INTERFACE
 # ─────────────────────────────────────────────────────────────────────────────
+def notificar_telegram(mensagem: str) -> bool:
+    # Envia um aviso a um grupo do Telegram. Lê as credenciais de st.secrets["telegram"]
+    # (bot_token e chat_id). Retorna True se o Telegram aceitou a mensagem.
+    try:
+        bot_token = st.secrets["telegram"]["bot_token"]
+        chat_id = st.secrets["telegram"]["chat_id"]
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        resposta = requests.post(url, json={"chat_id": chat_id, "text": mensagem}, timeout=10)
+        if resposta.status_code == 200:
+            return True
+        st.error(f"🚨 Erro do Telegram: {resposta.text}")
+        return False
+    except KeyError:
+        st.error("⚠️ Credenciais do Telegram não configuradas no secrets ([telegram]).")
+        return False
+    except Exception as e:
+        st.error(f"⚠️ Erro de conexão ao enviar o Telegram: {e}")
+        return False
+
 def injetar_botao_impressao():
     st.components.v1.html(
         """
@@ -1306,6 +1331,14 @@ def iniciar_tela(setor: str):
         loja_selecionada = st.selectbox("👁️ Visualizar como:", LOJAS_NOMES) if acesso_total else usuario_atual
         num_loja = int(loja_selecionada.split()[-1])
         usa_media = setor_usa_media(setor)
+        usa_sem_pedido = setor_usa_sem_pedido(setor)
+
+        # Mensagem do "Sem Pedido Hoje" — guardada no estado e exibida após o rerun
+        _msg_sp = st.session_state.pop(f"sem_pedido_msg_{setor}_{num_loja}", None)
+        if _msg_sp == "ok":
+            st.success("✅ Supervisor avisado e pedido zerado! Nenhum pedido será feito hoje.")
+        elif _msg_sp == "parcial":
+            st.warning("⚠️ O pedido foi zerado, mas falhou ao enviar o aviso no Telegram.")
 
         st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
@@ -1466,6 +1499,44 @@ def iniciar_tela(setor: str):
             st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Pedido", obs_rodape=(obs_loja if usa_obs else "")), file_name=f"Pedido_{loja_selecionada}.xlsx", use_container_width=True)
         with c_print: 
             injetar_botao_impressao()
+
+        # 🚫 "Sem Pedido Hoje" — só Açougue Adriano e Pioneiro+BF+Paraná (Açougue Especiais).
+        # Zera o pedido da loja no dia e dispara o aviso no Telegram, com confirmação em 1 passo.
+        if usa_sem_pedido:
+            chave_confirma = f"confirmar_sem_pedido_{setor}_{num_loja}"
+            if not st.session_state.get(chave_confirma):
+                if st.button(
+                    "🚫 Sem Pedido Hoje",
+                    use_container_width=True,
+                    help="Informa que esta loja NÃO fará pedido hoje: zera o que estiver lançado e avisa o supervisor no Telegram.",
+                ):
+                    st.session_state[chave_confirma] = True
+                    st.rerun()
+            else:
+                st.warning(
+                    f"⚠️ Confirma que a **{loja_selecionada}** **NÃO** fará pedido hoje? "
+                    "Isso apaga o que estiver lançado e avisa o supervisor no Telegram."
+                )
+                c_sp_sim, c_sp_nao = st.columns(2)
+                with c_sp_sim:
+                    if st.button("✔️ Sim, sem pedido hoje", type="primary", use_container_width=True, key=f"sp_sim_{setor}_{num_loja}"):
+                        with st.spinner("Registrando 'Sem Pedido Hoje'..."):
+                            supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
+                            msg_aviso = (
+                                f"🚨 AVISO - {setor}\n"
+                                f"A {loja_selecionada} informou que NÃO fará pedido hoje "
+                                f"({data_hora_brasilia()})."
+                            )
+                            enviado = notificar_telegram(msg_aviso)
+                        st.session_state[f"sem_pedido_msg_{setor}_{num_loja}"] = "ok" if enviado else "parcial"
+                        st.session_state[chave_confirma] = False
+                        # limpa o editor para a tela voltar zerada após o rerun
+                        st.session_state.pop(f"grid_loja_{num_loja}", None)
+                        st.rerun()
+                with c_sp_nao:
+                    if st.button("❌ Cancelar", use_container_width=True, key=f"sp_nao_{setor}_{num_loja}"):
+                        st.session_state[chave_confirma] = False
+                        st.rerun()
 
         if btn_salvar_loja:
             with st.spinner("Gravando pedido..."):
