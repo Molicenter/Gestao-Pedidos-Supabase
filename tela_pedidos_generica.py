@@ -180,11 +180,13 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str, com_obs: bool = False,
         "Cód. ERP": "Código",
         "TOTAL GERAL": "Total",
         "Qtde Pedida": "Pedido",
-        "Estoque ERP": "Estoque"
+        "Estoque ERP": "Estoque",
+        "Observação": "Observação:",
     })
 
-    # Observação manual: entra como última coluna (à direita do Total, se houver Total)
-    if com_obs:
+    # Se a tela já trouxe a Observação preenchida, ela vira a coluna do Excel.
+    # Senão, com_obs cria a coluna em branco para preenchimento manual.
+    if com_obs and not any("OBSERV" in str(c).upper() for c in df_export.columns):
         df_export["Observação:"] = ""
 
     def limpar_valor_excel(v):
@@ -431,7 +433,13 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str, sem_total: bool = 
                     c_total.font = font_bold
                     c_total.fill = fill_green
                 if obs_col:
-                    c_obs = worksheet.cell(row=current_row, column=obs_col, value="")
+                    obs_v = r.get("Observação", "")
+                    if obs_v is None or (isinstance(obs_v, float) and pd.isna(obs_v)):
+                        obs_v = ""
+                    obs_v = str(obs_v).strip()
+                    if obs_v in ("nan", "None", "<NA>"):
+                        obs_v = ""
+                    c_obs = worksheet.cell(row=current_row, column=obs_col, value=obs_v)
                     c_obs.alignment = align_left
                     c_obs.border = border_thin
                     c_obs.font = font_normal
@@ -1152,19 +1160,24 @@ def iniciar_tela(setor: str):
 
         usa_iceasa = setor_usa_iceasa(setor)
         texto_setor = setor_pedido_texto(setor)
+        eh_mp = setor_eh_materia_prima(setor)
         cols_cod = ["Cód. ERP", "Cód. Iceasa"] if usa_iceasa else ["Cód. ERP"]
         if usa_iceasa and "Cód. Iceasa" not in df_consolidado.columns:
             df_consolidado["Cód. Iceasa"] = None
 
-        # 💲 Preço/Observação do dia (só FLV): carrega o que já foi digitado e mapeia por codigo
+        # 💲 Preço/Observação do dia: FLV tem Preço+Observação; Matéria Prima tem só Observação.
+        # Tudo guardado em separacao_extras (sem tabela nova) e mapeado por 'codigo'.
         cols_extras = []
-        if usa_iceasa:
+        if usa_iceasa or eh_mp:
             df_extras = carregar_extras(setor, str(data_brasilia()))
-            mapa_preco = dict(zip(df_extras["codigo_produto"], df_extras["preco"])) if not df_extras.empty else {}
             mapa_obs = dict(zip(df_extras["codigo_produto"], df_extras["observacao"])) if not df_extras.empty else {}
-            df_consolidado["R$ Preço"] = df_consolidado["codigo"].map(mapa_preco).apply(preco_para_celula)
             df_consolidado["Observação"] = df_consolidado["codigo"].map(mapa_obs).fillna("").astype(str).replace({"None": "", "nan": "", "<NA>": ""})
-            cols_extras = ["R$ Preço", "Observação"]
+            if usa_iceasa:
+                mapa_preco = dict(zip(df_extras["codigo_produto"], df_extras["preco"])) if not df_extras.empty else {}
+                df_consolidado["R$ Preço"] = df_consolidado["codigo"].map(mapa_preco).apply(preco_para_celula)
+                cols_extras = ["R$ Preço", "Observação"]
+            else:
+                cols_extras = ["Observação"]
 
         # Matéria Prima/Embalagem/Padaria: sem coluna Total (pedem em texto)
         # Matéria Prima/Embalagem/Padaria: sem coluna Total em tudo (tela, Excel e impressão)
@@ -1182,13 +1195,15 @@ def iniciar_tela(setor: str):
         if usa_iceasa:
             col_cfg["R$ Preço"] = st.column_config.TextColumn("R$ Preço", width=88, help="Preço do dia (ex.: 12,50). Deixe vazio se não houver.")
             col_cfg["Observação"] = st.column_config.TextColumn("Observação", width=145)
+        elif eh_mp:
+            col_cfg["Observação"] = st.column_config.TextColumn("Observação:", width=240, help="Observação do item — sai também na exportação Excel.")
         for loja in LOJAS_NOMES: 
             col_cfg[loja] = st.column_config.TextColumn(loja, width=72, disabled=False)
 
         # 🧹 Antes de desenhar o editor: troca por vazio qualquer célula de Preço/Observação
         # que o usuário apagou (o data_editor guarda 'None' no estado e mostra "None" na tela).
         # Mexer no estado ANTES de instanciar o widget é permitido e faz a célula voltar a vazio.
-        if usa_iceasa:
+        if usa_iceasa or eh_mp:
             _est = st.session_state.get("editor_separacao")
             if isinstance(_est, dict) and isinstance(_est.get("edited_rows"), dict):
                 for _ch in _est["edited_rows"].values():
@@ -1245,13 +1260,13 @@ def iniciar_tela(setor: str):
                         if lista_ins: 
                             supabase.table("pedidos").insert(lista_ins).execute()
 
-                    # 💲 Preço/Observação do dia (só FLV): regrava o que tiver valor
-                    if usa_iceasa:
+                    # 💲 Preço/Observação do dia: FLV grava Preço+Obs; Matéria Prima grava só Obs.
+                    if usa_iceasa or eh_mp:
                         for i in range(0, len(cods), 200):
                             supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods[i:i+200]).execute()
                         lista_extras = []
                         for _, r in df_editado.iterrows():
-                            preco_val = celula_para_preco(r.get("R$ Preço"))
+                            preco_val = celula_para_preco(r.get("R$ Preço")) if usa_iceasa else None
                             obs_raw = r.get("Observação")
                             obs_val = str(obs_raw).strip() if pd.notna(obs_raw) and str(obs_raw).strip() != "" else None
                             if preco_val is not None or obs_val is not None:
@@ -1546,6 +1561,12 @@ def iniciar_tela(setor: str):
 
         usa_iceasa = setor_usa_iceasa(setor)
         texto_setor = setor_pedido_texto(setor)   # Matéria Prima/Embalagem/Padaria: sem Total na tela
+        eh_mp = setor_eh_materia_prima(setor)
+        mapa_obs_mp = {}
+        if eh_mp:
+            df_extras_mp = carregar_extras(setor, str(data_brasilia()))
+            if not df_extras_mp.empty:
+                mapa_obs_mp = dict(zip(df_extras_mp["codigo_produto"], df_extras_mp["observacao"]))
         for forn in sorted(df_mestre["fornecedor"].dropna().unique()):
             df_forn_bruto = df_mestre[df_mestre["fornecedor"] == forn]
             lojas_ativas = [l for l in LOJAS_NOMES if not (df_forn_bruto[l] == "-").all()]
@@ -1554,6 +1575,8 @@ def iniciar_tela(setor: str):
                 df_forn_bruto = df_forn_bruto.assign(codigo_iceasa=None)
             cols_total_f = [] if texto_setor else ["TOTAL GERAL"]
             df_forn_view = df_forn_bruto[["codigo"] + cols_cod_f + ["descricao"] + lojas_ativas + cols_total_f].rename(columns={'codigo_erp': 'Cód. ERP', 'codigo_iceasa': 'Cód. Iceasa', 'descricao': 'Produto'}).sort_values(by='Produto')
+            if eh_mp:
+                df_forn_view["Observação"] = df_forn_view["codigo"].map(mapa_obs_mp).fillna("").astype(str).replace({"None": "", "nan": "", "<NA>": ""})
             
             with st.container(border=True):
                 st.markdown(f"<div class='no-print'><h5>Fornecedor: {forn}</h5></div>", unsafe_allow_html=True)
@@ -1566,11 +1589,19 @@ def iniciar_tela(setor: str):
                 }
                 for l in lojas_ativas: 
                     col_cfg_f[l] = st.column_config.TextColumn(l, width=85, disabled=False)
+                if eh_mp:
+                    col_cfg_f["Observação"] = st.column_config.TextColumn("Observação:", width=240, help="Observação do item — sai também na exportação Excel.")
+                    # limpa "None" preso no estado quando a célula é apagada
+                    _estf = st.session_state.get(f"editor_forn_{forn}")
+                    if isinstance(_estf, dict) and isinstance(_estf.get("edited_rows"), dict):
+                        for _ch in _estf["edited_rows"].values():
+                            if "Observação" in _ch and _ch["Observação"] is None:
+                                _ch["Observação"] = ""
                     
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
                 # Impressão: p/ FLV o código mostrado é o Iceasa (ERP sai), com regra >9000/vazio
-                df_forn_print = df_forn_view.drop(columns=['codigo'], errors='ignore').fillna('')
+                df_forn_print = df_forn_view.drop(columns=['codigo', 'Observação'], errors='ignore').fillna('')
                 if usa_iceasa:
                     df_forn_print['Cód. Iceasa'] = df_forn_print['Cód. Iceasa'].apply(iceasa_para_impressao)
                     df_forn_print = df_forn_print.drop(columns=['Cód. ERP'], errors='ignore')
@@ -1613,6 +1644,19 @@ def iniciar_tela(setor: str):
                             
                             if lista_ins: 
                                 supabase.table("pedidos").insert(lista_ins).execute()
+
+                        # 📝 Observação por produto (só Matéria Prima) → separacao_extras
+                        if eh_mp:
+                            for i in range(0, len(cods), 200):
+                                supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods[i:i+200]).execute()
+                            lista_extras = []
+                            for _, r in df_forn_editado_full.iterrows():
+                                obs_raw = r.get("Observação")
+                                obs_val = str(obs_raw).strip() if pd.notna(obs_raw) and str(obs_raw).strip() != "" else None
+                                if obs_val is not None:
+                                    lista_extras.append({"codigo_produto": int(r["codigo"]), "data_pedido": str(data_brasilia()), "setor": setor, "preco": None, "observacao": obs_val})
+                            for i in range(0, len(lista_extras), 1000):
+                                supabase.table("separacao_extras").insert(lista_extras[i:i+1000]).execute()
                 st.success("Alterações consolidadas!")
                 st.rerun()
 
