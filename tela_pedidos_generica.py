@@ -1491,33 +1491,11 @@ def iniciar_tela(setor: str):
             obs_html = f'<div class="print-obs-loja"><strong>📝 Observação Geral da Loja:</strong><br>{obs_fmt}</div>'
         st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
 
-        # Linha de botões. No Açougue Adriano/Especiais entra o "Sem Pedido Hoje"
-        # (menor) entre Salvar e Exportar; nos demais setores a linha fica como antes.
+        # Chave de confirmação do "Sem Pedido Hoje" (usada na faixa de confirmação e no botão).
         chave_confirma = f"confirmar_sem_pedido_{setor}_{num_loja}"
-        if usa_sem_pedido:
-            c_salvar, c_sem, c_excel, c_print = st.columns([2, 1.5, 2, 1])
-        else:
-            c_salvar, c_excel, c_print = st.columns([2, 2, 1])
-            c_sem = None
 
-        with c_salvar: 
-            btn_salvar_loja = st.button("💾 Salvar Pedido Oficial", type="primary", use_container_width=True)
-        if c_sem is not None:
-            with c_sem:
-                if st.button(
-                    "🚫 Sem Pedido Hoje",
-                    use_container_width=True,
-                    help="Informa que esta loja NÃO fará pedido hoje: zera o que estiver lançado e avisa o supervisor no Telegram.",
-                ):
-                    st.session_state[chave_confirma] = True
-                    st.rerun()
-        with c_excel:
-            df_export = grid_editado.drop(columns=['codigo'], errors='ignore')
-            st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Pedido", obs_rodape=(obs_loja if usa_obs else "")), file_name=f"Pedido_{loja_selecionada}.xlsx", use_container_width=True)
-        with c_print: 
-            injetar_botao_impressao()
-
-        # 🚫 Confirmação do "Sem Pedido Hoje" — aparece abaixo da linha quando o botão é clicado.
+        # 🚫 Confirmação do "Sem Pedido Hoje" — fica ACIMA da linha de botões para já aparecer
+        # no campo de visão (a tela costuma estar rolada na base, mostrando só os botões).
         # Só no "Sim" é que zera o pedido da loja no dia e dispara o aviso no Telegram.
         if usa_sem_pedido and st.session_state.get(chave_confirma):
             st.warning(
@@ -1544,6 +1522,31 @@ def iniciar_tela(setor: str):
                 if st.button("❌ Cancelar", use_container_width=True, key=f"sp_nao_{setor}_{num_loja}"):
                     st.session_state[chave_confirma] = False
                     st.rerun()
+
+        # Linha de botões. No Açougue Adriano/Especiais entra o "Sem Pedido Hoje"
+        # (menor) entre Salvar e Exportar; nos demais setores a linha fica como antes.
+        if usa_sem_pedido:
+            c_salvar, c_sem, c_excel, c_print = st.columns([2, 1.5, 2, 1])
+        else:
+            c_salvar, c_excel, c_print = st.columns([2, 2, 1])
+            c_sem = None
+
+        with c_salvar: 
+            btn_salvar_loja = st.button("💾 Salvar Pedido Oficial", type="primary", use_container_width=True)
+        if c_sem is not None:
+            with c_sem:
+                if st.button(
+                    "🚫 Sem Pedido Hoje",
+                    use_container_width=True,
+                    help="Informa que esta loja NÃO fará pedido hoje: zera o que estiver lançado e avisa o supervisor no Telegram.",
+                ):
+                    st.session_state[chave_confirma] = True
+                    st.rerun()
+        with c_excel:
+            df_export = grid_editado.drop(columns=['codigo'], errors='ignore')
+            st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Pedido", obs_rodape=(obs_loja if usa_obs else "")), file_name=f"Pedido_{loja_selecionada}.xlsx", use_container_width=True)
+        with c_print: 
+            injetar_botao_impressao()
 
         if btn_salvar_loja:
             with st.spinner("Gravando pedido..."):
