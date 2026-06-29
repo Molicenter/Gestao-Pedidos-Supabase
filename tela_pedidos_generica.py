@@ -98,6 +98,14 @@ def setor_usa_sem_pedido(setor) -> bool:
     # no Açougue Adriano e no Pioneiro+BF+Paraná (que no Supabase é "Açougue Especiais").
     return _normaliza_setor(setor) in ("acougue adriano", "acougue especiais")
 
+def setor_eh_pecas_manoel(setor) -> bool:
+    # Peças Açougue - Manoel: NÃO tem código ERP, nem estoque do ERP, nem média 90d.
+    return "manoel" in _normaliza_setor(setor)
+
+def setor_usa_erp(setor) -> bool:
+    # Setores ligados ao ERP (têm Cód. ERP e puxam estoque). Peças Manoel não usa.
+    return not setor_eh_pecas_manoel(setor)
+
 # Views de média no ERP (período base de 90 dias)
 VIEWS_MEDIA = {
     "Média Semanal": "python_90dSEMANA",
@@ -108,8 +116,8 @@ VIEWS_MEDIA = {
 }
 
 def setor_usa_media(setor) -> bool:
-    # Embalagem/Padaria/Confeitaria/Matéria Prima NÃO usam a coluna Média na Visão das Lojas.
-    return not setor_pedido_texto(setor)
+    # Embalagem/Padaria/Confeitaria/Matéria Prima e Peças Açougue-Manoel NÃO usam a coluna Média.
+    return not setor_pedido_texto(setor) and not setor_eh_pecas_manoel(setor)
 
 def filtro_media_padrao(setor) -> str:
     # Filtro de média já pré-selecionado por setor (o admin ainda pode trocar).
@@ -1435,10 +1443,15 @@ def iniciar_tela(setor: str):
 
         st.metric(label="📝 Seus Itens Preenchidos", value=f"{itens_digitados} produtos")
 
-        codigos_busca_erp = df_loja["codigo_erp"].dropna().astype(int).unique().tolist()
-        df_estoque = buscar_estoque_erp(loja_selecionada, codigos_busca_erp, setor)
-        df_loja = pd.merge(df_loja, df_estoque, left_on='codigo_erp', right_on='Código', how='left')
-        df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
+        usa_erp = setor_usa_erp(setor)
+        if usa_erp:
+            codigos_busca_erp = df_loja["codigo_erp"].dropna().astype(int).unique().tolist()
+            df_estoque = buscar_estoque_erp(loja_selecionada, codigos_busca_erp, setor)
+            df_loja = pd.merge(df_loja, df_estoque, left_on='codigo_erp', right_on='Código', how='left')
+            df_loja["Estoque"] = df_loja["Estoque"].fillna(0).astype(int)
+        else:
+            # Peças Açougue - Manoel: não há ERP para puxar estoque
+            df_loja["Estoque"] = 0
         
         df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
 
@@ -1455,6 +1468,10 @@ def iniciar_tela(setor: str):
         # Embalagem/Padaria/Confeitaria/Matéria Prima: sem a coluna Média na Visão das Lojas
         if not usa_media:
             df_final_grid = df_final_grid.drop(columns=['Média (90d)'], errors='ignore')
+
+        # Peças Açougue - Manoel: sem Estoque ERP (não há ERP para este setor)
+        if not usa_erp:
+            df_final_grid = df_final_grid.drop(columns=['Estoque ERP'], errors='ignore')
 
         texto_busca = st.text_input("🔍 Buscar Produto (por Código ou Nome):")
         if texto_busca:
@@ -1942,6 +1959,7 @@ def iniciar_tela(setor: str):
             df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
 
         usa_iceasa = setor_usa_iceasa(setor)
+        usa_erp = setor_usa_erp(setor)
         if usa_iceasa and 'codigo_iceasa' not in df_cat_completo.columns:
             df_cat_completo['codigo_iceasa'] = None
 
@@ -1950,17 +1968,20 @@ def iniciar_tela(setor: str):
 
         col_cfg_c = {
             "codigo": None,
-            "codigo_erp": st.column_config.NumberColumn("Cód. ERP", format="%d", width=80), 
             "descricao": st.column_config.TextColumn("Nome Prime", width=180), 
             "nome_personalizado": st.column_config.TextColumn("Nome Manual", width=160),
             "fornecedor": st.column_config.TextColumn("Fornecedor", width=130)
         }
+        if usa_erp:
+            col_cfg_c["codigo_erp"] = st.column_config.NumberColumn("Cód. ERP", format="%d", width=80)
         if usa_iceasa:
             col_cfg_c["codigo_iceasa"] = st.column_config.NumberColumn("Cód. Iceasa", format="%d", width=90)
         for l in LOJAS_NOMES: 
             col_cfg_c[l] = st.column_config.CheckboxColumn(l)
 
-        cols_base = ["fornecedor", "codigo", "codigo_erp"]
+        cols_base = ["fornecedor", "codigo"]
+        if usa_erp:
+            cols_base.append("codigo_erp")
         if usa_iceasa:
             cols_base.append("codigo_iceasa")
         cols_exibicao = cols_base + ["descricao", "nome_personalizado"] + LOJAS_NOMES
@@ -1985,7 +2006,7 @@ def iniciar_tela(setor: str):
                     codigos_globais = [p["codigo"] for p in resp_all.data] if resp_all.data else []
                     codigos_conhecidos = set(df_cat_completo['codigo'].dropna().astype(int).tolist()) if not df_cat_completo.empty else set()
                     
-                    mapa_conflitos = {}
+                    mapa_novos_idx = {}  # índice da linha nova → código (PK) gerado
 
                     if state and state.get("deleted_rows"):
                         for idx in state["deleted_rows"]:
@@ -2021,23 +2042,35 @@ def iniciar_tela(setor: str):
                             if prod_changes: 
                                 supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
-                    for _, row in edited_cat.iterrows():
+                    for idx, row in edited_cat.iterrows():
                         c_pk = row.get("codigo")
-                        c_erp = row.get("codigo_erp") 
-                        if pd.isna(c_pk) or str(c_pk).strip() == "":
-                            if pd.isna(c_erp) or str(c_erp).strip() == "": continue
-                            cod_erp_digitado = int(c_erp)
+                        # Linha já existente (tem PK) não é inserida aqui.
+                        if pd.notna(c_pk) and str(c_pk).strip() != "":
+                            continue
+
+                        c_erp = row.get("codigo_erp")
+                        tem_erp = usa_erp and pd.notna(c_erp) and str(c_erp).strip() != ""
+                        forn_add = str(row.get("fornecedor", "Box")).strip()
+                        desc_add = str(row.get("descricao", "")).strip()
+
+                        # Sem ERP e sem descrição → linha vazia, ignora.
+                        if not tem_erp and (desc_add == "" or desc_add.lower() == "nan"):
+                            continue
+                        if desc_add == "" or desc_add.lower() == "nan":
+                            desc_add = "Novo Produto"
+
+                        np_add = str(row.get("nome_personalizado", "")).strip() if pd.notna(row.get("nome_personalizado")) and str(row.get("nome_personalizado")).strip() != "" else None
+                        ice_add = None
+                        if usa_iceasa:
+                            v_ice = row.get("codigo_iceasa")
+                            try:
+                                ice_add = int(v_ice) if pd.notna(v_ice) and str(v_ice).strip() != "" else None
+                            except (ValueError, TypeError):
+                                ice_add = None
+
+                        if tem_erp:
+                            cod_erp_digitado = int(float(c_erp))
                             cod_final = cod_erp_digitado
-                            forn_add = str(row.get("fornecedor", "Box")).strip()
-                            desc_add = str(row.get("descricao", "Novo Produto")).strip()
-                            np_add = str(row.get("nome_personalizado", "")).strip() if pd.notna(row.get("nome_personalizado")) and str(row.get("nome_personalizado")).strip() != "" else None
-                            ice_add = None
-                            if usa_iceasa:
-                                v_ice = row.get("codigo_iceasa")
-                                try:
-                                    ice_add = int(v_ice) if pd.notna(v_ice) and str(v_ice).strip() != "" else None
-                                except (ValueError, TypeError):
-                                    ice_add = None
                             if cod_final in codigos_globais:
                                 base_str = str(cod_final)
                                 for i in range(1, 100):
@@ -2046,24 +2079,29 @@ def iniciar_tela(setor: str):
                                         cod_final = tent
                                         break
                                 st.toast(f"🤖 Gerado código interno invisível {cod_final} para o item {cod_erp_digitado} do ERP.", icon="✨")
-                            mapa_conflitos[(cod_erp_digitado, forn_add)] = cod_final
-                            supabase.table("produtos").insert({
-                                "codigo": cod_final, "codigo_erp": cod_erp_digitado,
-                                "codigo_iceasa": ice_add,
-                                "descricao": desc_add, "fornecedor": forn_add, 
-                                "nome_personalizado": np_add, "setor": setor, "ativo": True
-                            }).execute()
-                            codigos_globais.append(cod_final); codigos_conhecidos.add(cod_final)
+                        else:
+                            # Setor sem ERP (ex.: Peças Açougue - Manoel): gera um PK novo sequencial.
+                            cod_erp_digitado = None
+                            cod_final = (max(codigos_globais) + 1) if codigos_globais else 1
+
+                        mapa_novos_idx[idx] = cod_final
+                        supabase.table("produtos").insert({
+                            "codigo": cod_final, "codigo_erp": cod_erp_digitado,
+                            "codigo_iceasa": ice_add,
+                            "descricao": desc_add, "fornecedor": forn_add, 
+                            "nome_personalizado": np_add, "setor": setor, "ativo": True
+                        }).execute()
+                        codigos_globais.append(cod_final); codigos_conhecidos.add(cod_final)
 
                     lista_perms_geral = []
                     codigos_processados_perms = set()
                     
-                    for _, row in edited_cat.iterrows():
+                    for idx, row in edited_cat.iterrows():
                         c_pk = row.get("codigo")
-                        c_erp = row.get("codigo_erp")
-                        f_tela = str(row.get("fornecedor", "")).strip()
-                        if pd.notna(c_pk) and str(c_pk).strip() != "": c_final = int(c_pk)
-                        else: c_final = mapa_conflitos.get((int(c_erp), f_tela), None)
+                        if pd.notna(c_pk) and str(c_pk).strip() != "":
+                            c_final = int(c_pk)
+                        else:
+                            c_final = mapa_novos_idx.get(idx, None)
                         if not c_final: continue
                         
                         codigos_processados_perms.add(c_final)
