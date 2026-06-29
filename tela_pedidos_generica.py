@@ -1491,15 +1491,18 @@ def iniciar_tela(setor: str):
 
         col_cfg_l = {
             "codigo": None,
-            "Cód. ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=80), 
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=120), 
-            "Descrição": st.column_config.TextColumn(disabled=True, width=250),
-            "Estoque ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=90), 
-            "Média (90d)": st.column_config.NumberColumn(disabled=True, format="%.2f", width=90),
-            "Qtde Pedida": st.column_config.TextColumn("Qtde", width=100)
+            "Cód. ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=70), 
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=95), 
+            "Descrição": st.column_config.TextColumn(disabled=True, width=230),
+            "Estoque ERP": st.column_config.NumberColumn("Estoque", disabled=True, format="%d", width=72), 
+            "Média (90d)": st.column_config.NumberColumn("Média", disabled=True, format="%.2f", width=72),
+            "Qtde Pedida": st.column_config.TextColumn("Qtde", width=85)
         }
 
-        grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=True, key=f"grid_loja_{num_loja}")
+        # use_container_width=False: as colunas respeitam a largura definida e não
+        # "esticam" para preencher a tela (igual à Visão Fornecedores). Fica bem mais
+        # compacto — importante porque as lojas também acessam pelo celular.
+        grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=False, key=f"grid_loja_{num_loja}")
 
         # ⚠️ ITEM 3 — alerta de pedido muito acima da média (10x). grid_editado já traz
         # os valores digitados (mesmo antes de salvar), então o alerta atualiza na hora.
