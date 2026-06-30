@@ -106,6 +106,13 @@ def setor_usa_erp(setor) -> bool:
     # Setores ligados ao ERP (têm Cód. ERP e puxam estoque). Peças Manoel não usa.
     return not setor_eh_pecas_manoel(setor)
 
+def grupo_fornecedor(forn) -> str:
+    # Agrupa os fornecedores "BIG FRANGO - *" sob um único rótulo de filtro "BIG FRANGO".
+    # A coluna Fornecedor continua mostrando o nome completo de cada tipo (Mix Balcão etc.).
+    if _normaliza_setor(forn).startswith("big frango"):
+        return "BIG FRANGO"
+    return str(forn).strip()
+
 # Views de média no ERP (período base de 90 dias)
 VIEWS_MEDIA = {
     "Média Semanal": "python_90dSEMANA",
@@ -824,8 +831,9 @@ def modal_sem_pedido(setor: str, num_loja: int, loja_selecionada: str):
                 )
                 enviado = notificar_telegram(msg_aviso)
             st.session_state[f"sem_pedido_msg_{setor}_{num_loja}"] = "ok" if enviado else "parcial"
-            # limpa o editor para a tela voltar zerada após o rerun
-            st.session_state.pop(f"grid_loja_{num_loja}", None)
+            # limpa o editor (todas as variações de filtro) para a tela voltar zerada
+            for _k in [k for k in list(st.session_state.keys()) if str(k).startswith(f"grid_loja_{num_loja}")]:
+                st.session_state.pop(_k, None)
             st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1382,7 +1390,7 @@ def iniciar_tela(setor: str):
         elif _msg_sp == "parcial":
             st.warning("⚠️ O pedido foi zerado, mas falhou ao enviar o aviso no Telegram.")
 
-        st.markdown(f"<div class='no-print'><h2>📦 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
         df_prod = carregar_produtos(setor, somente_ativos=True).copy()
 
@@ -1479,6 +1487,18 @@ def iniciar_tela(setor: str):
         if not usa_erp:
             df_final_grid = df_final_grid.drop(columns=['Estoque ERP', 'Cód. ERP'], errors='ignore')
 
+        # 🔍 Filtro por Fornecedor (igual ao da Separação). Os tipos "BIG FRANGO - *"
+        # entram todos sob o mesmo rótulo "BIG FRANGO"; a coluna Fornecedor segue
+        # mostrando o tipo específico. Só aparece quando há mais de um fornecedor.
+        filtro_forn = "Todos"
+        df_final_grid["_grupo_forn"] = df_final_grid["Fornecedor"].apply(grupo_fornecedor)
+        grupos_forn = ["Todos"] + sorted(df_final_grid["_grupo_forn"].dropna().unique().tolist())
+        if len(grupos_forn) > 2:
+            filtro_forn = st.radio("🔍 Filtrar por Fornecedor:", options=grupos_forn, horizontal=True, key=f"filtro_forn_loja_{setor}_{num_loja}")
+            if filtro_forn != "Todos":
+                df_final_grid = df_final_grid[df_final_grid["_grupo_forn"] == filtro_forn]
+        df_final_grid = df_final_grid.drop(columns=["_grupo_forn"], errors="ignore")
+
         texto_busca = st.text_input("🔍 Buscar Produto (por Código ou Nome):")
         if texto_busca:
             tb = texto_busca.lower().strip()
@@ -1502,7 +1522,9 @@ def iniciar_tela(setor: str):
         # use_container_width=False: as colunas respeitam a largura definida e não
         # "esticam" para preencher a tela (igual à Visão Fornecedores). Fica bem mais
         # compacto — importante porque as lojas também acessam pelo celular.
-        grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=False, key=f"grid_loja_{num_loja}")
+        # A chave inclui o filtro: ao trocar de fornecedor o editor reinicia limpo,
+        # evitando que um valor digitado "escorregue" para a linha de outro produto.
+        grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=False, key=f"grid_loja_{num_loja}_{filtro_forn}")
 
         # ⚠️ ITEM 3 — alerta de pedido muito acima da média (10x). grid_editado já traz
         # os valores digitados (mesmo antes de salvar), então o alerta atualiza na hora.
@@ -1545,7 +1567,7 @@ def iniciar_tela(setor: str):
         if usa_obs and (obs_loja or "").strip():
             obs_fmt = (obs_loja or "").strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
             obs_html = f'<div class="print-obs-loja"><strong>📝 Observação Geral da Loja:</strong><br>{obs_fmt}</div>'
-        st.markdown(f'<div class="print-only print-lojas"><h3>📦 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
 
         # Linha de botões. No Açougue Adriano/Especiais entra o "Sem Pedido Hoje"
         # (menor) entre Salvar e Exportar; nos demais setores a linha fica como antes.
@@ -1592,8 +1614,9 @@ def iniciar_tela(setor: str):
                 if usa_obs:
                     salvar_obs_loja(setor, num_loja, str(data_brasilia()), obs_loja, usuario_atual)
             st.success("Gravado!")
-            # limpa o estado dos editores para o guarda de "não salvo" desligar
-            st.session_state.pop(f"grid_loja_{num_loja}", None)
+            # limpa o estado dos editores (todas as variações de filtro) p/ o guarda desligar
+            for _k in [k for k in list(st.session_state.keys()) if str(k).startswith(f"grid_loja_{num_loja}")]:
+                st.session_state.pop(_k, None)
             st.session_state.pop(f"obs_loja_{setor}_{num_loja}", None)
             st.rerun()
 
