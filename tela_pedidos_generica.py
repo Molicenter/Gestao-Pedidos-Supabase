@@ -1210,11 +1210,14 @@ def iniciar_tela(setor: str):
         st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
         col_filtro, col_metric = st.columns([3, 1])
         with col_filtro:
-            opcoes_forn = ["Todos"] + sorted([str(f) for f in df_consolidado['fornecedor'].unique() if pd.notna(f) and str(f).strip() != ""])
+            # Agrupa "BIG FRANGO - *" sob o rótulo "BIG FRANGO" (igual à Visão das Lojas).
+            # A coluna Fornecedor segue mostrando o tipo específico de cada produto.
+            df_consolidado["_grupo_forn"] = df_consolidado['fornecedor'].apply(grupo_fornecedor)
+            opcoes_forn = ["Todos"] + sorted([g for g in df_consolidado["_grupo_forn"].dropna().unique() if str(g).strip() != ""])
             filtro_selecionado = st.radio("🔍 Filtrar Exibição por Setor:", options=opcoes_forn, horizontal=True)
 
         if filtro_selecionado != "Todos": 
-            df_consolidado = df_consolidado[df_consolidado['fornecedor'] == filtro_selecionado]
+            df_consolidado = df_consolidado[df_consolidado['_grupo_forn'] == filtro_selecionado]
 
         st.metric(label="📦 Itens c/ pedido", value=f"{df_consolidado[df_consolidado['TOTAL_NUM'] > 0].shape[0]} produtos")
 
@@ -1263,7 +1266,7 @@ def iniciar_tela(setor: str):
             "codigo": None, 
             "Cód. ERP": st.column_config.NumberColumn("Cód. ERP", disabled=True, format="%d", width=70), 
             "Cód. Iceasa": st.column_config.NumberColumn("Cód. Iceasa", disabled=True, format="%d", width=78), 
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=90), 
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=180), 
             "Descrição": st.column_config.TextColumn(disabled=True, width=175), 
             "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=56)
         }
@@ -1512,7 +1515,7 @@ def iniciar_tela(setor: str):
         col_cfg_l = {
             "codigo": None,
             "Cód. ERP": st.column_config.NumberColumn(disabled=True, format="%d", width=70), 
-            "Fornecedor": st.column_config.TextColumn(disabled=True, width=95), 
+            "Fornecedor": st.column_config.TextColumn(disabled=True, width=190), 
             "Descrição": st.column_config.TextColumn(disabled=True, width=230),
             "Estoque ERP": st.column_config.NumberColumn("Estoque", disabled=True, format="%d", width=72), 
             "Média (90d)": st.column_config.NumberColumn("Média", disabled=True, format="%.2f", width=72),
