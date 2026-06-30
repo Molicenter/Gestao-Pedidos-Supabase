@@ -836,6 +836,16 @@ def modal_sem_pedido(setor: str, num_loja: int, loja_selecionada: str):
                 st.session_state.pop(_k, None)
             st.rerun()
 
+@st.dialog("✅ Pedido Salvo com Sucesso")
+def modal_pedido_salvo(loja_selecionada: str):
+    # Janela de confirmação exibida quando a loja salva o pedido e a gravação dá certo.
+    # É disparada após o rerun do botão "Salvar Pedido" (via flag no session_state).
+    st.markdown(f"O pedido da **{loja_selecionada}** foi **salvo com sucesso**! ✅")
+    st.markdown("Pode conferir, imprimir ou exportar quando quiser.")
+    st.write("<br>", unsafe_allow_html=True)
+    if st.button("👍 Fechar", type="primary", use_container_width=True, key=f"modal_salvo_fechar_{loja_selecionada}"):
+        st.rerun()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🧠 FUNÇÃO DIRETORA DO MÓDULO UNIFICADO
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1401,6 +1411,10 @@ def iniciar_tela(setor: str):
         elif _msg_sp == "parcial":
             st.warning("⚠️ O pedido foi zerado, mas falhou ao enviar o aviso no Telegram.")
 
+        # ✅ Confirmação de salvamento — abre o modal após o rerun do "Salvar Pedido"
+        if st.session_state.pop(f"pedido_salvo_ok_{setor}_{num_loja}", None):
+            modal_pedido_salvo(loja_selecionada)
+
         st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
         df_prod = carregar_produtos(setor, somente_ativos=True).copy()
@@ -1589,7 +1603,7 @@ def iniciar_tela(setor: str):
             c_sem = None
 
         with c_salvar: 
-            btn_salvar_loja = st.button("💾 Salvar Pedido Oficial", type="primary", use_container_width=True)
+            btn_salvar_loja = st.button("💾 Salvar Pedido", type="primary", use_container_width=True)
         if c_sem is not None:
             with c_sem:
                 # Abre a janela de confirmação centralizada (modal). Só no "Sim" é que
@@ -1624,11 +1638,12 @@ def iniciar_tela(setor: str):
                 # 📝 grava a Observação Geral da Loja (embalagem/padaria/confeitaria)
                 if usa_obs:
                     salvar_obs_loja(setor, num_loja, str(data_brasilia()), obs_loja, usuario_atual)
-            st.success("Gravado!")
             # limpa o estado dos editores (todas as variações de filtro) p/ o guarda desligar
             for _k in [k for k in list(st.session_state.keys()) if str(k).startswith(f"grid_loja_{num_loja}")]:
                 st.session_state.pop(_k, None)
             st.session_state.pop(f"obs_loja_{setor}_{num_loja}", None)
+            # ✅ sinaliza sucesso → o modal de confirmação aparece após o rerun
+            st.session_state[f"pedido_salvo_ok_{setor}_{num_loja}"] = True
             st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
