@@ -645,7 +645,7 @@ def injetar_botao_impressao():
         height=42,
     )
 
-def exibir_status_digitacao_lojas(df_pedidos_hoje):
+def exibir_status_digitacao_lojas(df_pedidos_hoje, lojas_sem_pedido=None):
     st.markdown(
         f"<div class='no-print' style='font-weight:600; font-size:1.05rem; margin:2px 0 6px 0;'>"
         f"🏪 Status de Digitação das Lojas — {data_hora_brasilia()}</div>",
@@ -656,12 +656,18 @@ def exibir_status_digitacao_lojas(df_pedidos_hoje):
         lojas_codigos = df_pedidos_hoje["loja"].unique()
         for c in lojas_codigos: 
             lojas_que_digitam.add(f"Loja {c:02d}")
-    
+
+    # Lojas que declararam "Sem Pedido Hoje" — contam como respondidas (ficam verdes).
+    sem_pedido_nomes = {f"Loja {int(n):02d}" for n in (lojas_sem_pedido or set())}
+
     cols = st.columns(8)
     for i, loja_nome in enumerate(LOJAS_NOMES):
         with cols[i]:
             if loja_nome in lojas_que_digitam:
                 st.markdown(f"<div class='no-print' style='text-align:center; background-color:#d4edda; color:#155724; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>✅ OK</div>", unsafe_allow_html=True)
+            elif loja_nome in sem_pedido_nomes:
+                # Verde também, mas sinalizando que foi uma declaração de "sem pedido"
+                st.markdown(f"<div class='no-print' style='text-align:center; background-color:#d4edda; color:#155724; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>✅ Sem Pedido</div>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<div class='no-print' style='text-align:center; background-color:#f8d7da; color:#721c24; padding:5px; border-radius:5px; font-size:11px; font-weight:bold;'>{loja_nome}<br>❌ Faltando</div>", unsafe_allow_html=True)
     st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
@@ -769,6 +775,38 @@ def salvar_obs_loja(setor: str, num_loja: int, data_str: str, texto: str, usuari
             "observacao": txt, "usuario": usuario
         }).execute()
 
+# 🚫 "Sem Pedido Hoje" — registro de que a loja declarou que NÃO fará pedido no dia.
+# Guardado na tabela sem_pedido_hoje p/ a Separação poder marcar a loja em verde
+# (senão, como o pedido é apagado, ela voltaria a aparecer como "Faltando").
+def carregar_sem_pedido(setor: str, data_str: str) -> set:
+    # Conjunto de lojas (int) que declararam "Sem Pedido Hoje" no setor/dia. SEM cache.
+    # Defensivo: se a tabela ainda não existir, retorna vazio (não quebra a tela).
+    try:
+        supabase = obter_supabase()
+        resp = supabase.table("sem_pedido_hoje").select("loja").eq("setor", setor).eq("data_pedido", data_str).execute()
+        return {int(r["loja"]) for r in resp.data} if resp.data else set()
+    except Exception:
+        return set()
+
+def registrar_sem_pedido(setor: str, num_loja: int, data_str: str, usuario: str):
+    # Grava (regravando) a declaração de "sem pedido" da loja no dia.
+    supabase = obter_supabase()
+    try:
+        supabase.table("sem_pedido_hoje").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", data_str).execute()
+        supabase.table("sem_pedido_hoje").insert({
+            "data_pedido": data_str, "setor": setor, "loja": num_loja, "usuario": usuario
+        }).execute()
+    except Exception as e:
+        st.warning(f"⚠️ Não consegui marcar 'Sem Pedido' na Separação — crie a tabela `sem_pedido_hoje` no Supabase. ({e})")
+
+def remover_sem_pedido(setor: str, num_loja: int, data_str: str):
+    # Remove a marca de "sem pedido" (ex.: a loja mudou de ideia e lançou itens).
+    try:
+        supabase = obter_supabase()
+        supabase.table("sem_pedido_hoje").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", data_str).execute()
+    except Exception:
+        pass
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🛡️ PROTEÇÃO CONTRA PERDA DE DIGITAÇÃO (avisa antes de fechar/recarregar a aba)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -805,6 +843,10 @@ def modal_limpar_pedidos(setor: str):
                 supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
                 supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
                 supabase.table("observacoes_lojas").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+                try:
+                    supabase.table("sem_pedido_hoje").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+                except Exception:
+                    pass
             # reseta o editor p/ não ficar 'None' preso em células que foram apagadas
             st.session_state.pop("editor_separacao", None)
             st.rerun()
@@ -824,6 +866,8 @@ def modal_sem_pedido(setor: str, num_loja: int, loja_selecionada: str):
             supabase = obter_supabase()
             with st.spinner("Registrando 'Sem Pedido Hoje'..."):
                 supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
+                # registra a declaração p/ a loja ficar VERDE ("Sem Pedido") na Separação
+                registrar_sem_pedido(setor, num_loja, str(data_brasilia()), st.session_state.get('usuario_logado', loja_selecionada))
                 msg_aviso = (
                     f"🚨 AVISO - {setor}\n"
                     f"A {loja_selecionada} informou que NÃO fará pedido hoje "
@@ -1189,7 +1233,9 @@ def iniciar_tela(setor: str):
         df_perm_all = buscar_permissoes_setor(supabase, codigos_setor)
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
-        exibir_status_digitacao_lojas(df_ped)
+        # Lojas que declararam "Sem Pedido Hoje" (Açougue Adriano / Especiais) → ficam verdes
+        lojas_sem_pedido = carregar_sem_pedido(setor, str(data_brasilia())) if setor_usa_sem_pedido(setor) else set()
+        exibir_status_digitacao_lojas(df_ped, lojas_sem_pedido)
         
         if not df_ped.empty:
             df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
@@ -1415,7 +1461,7 @@ def iniciar_tela(setor: str):
         if st.session_state.pop(f"pedido_salvo_ok_{setor}_{num_loja}", None):
             modal_pedido_salvo(loja_selecionada)
 
-        st.markdown(f"<div class='no-print'><h2>📦 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
         df_prod = carregar_produtos(setor, somente_ativos=True).copy()
 
@@ -1592,7 +1638,7 @@ def iniciar_tela(setor: str):
         if usa_obs and (obs_loja or "").strip():
             obs_fmt = (obs_loja or "").strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
             obs_html = f'<div class="print-obs-loja"><strong>📝 Observação Geral da Loja:</strong><br>{obs_fmt}</div>'
-        st.markdown(f'<div class="print-only print-lojas"><h3>📦 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
 
         # Linha de botões. No Açougue Adriano/Especiais entra o "Sem Pedido Hoje"
         # (menor) entre Salvar e Exportar; nos demais setores a linha fica como antes.
@@ -1634,6 +1680,9 @@ def iniciar_tela(setor: str):
                     
                     if lista_ins: 
                         supabase.table("pedidos").insert(lista_ins).execute()
+                        # se a loja tinha declarado "sem pedido" e agora lançou itens, tira a marca
+                        if usa_sem_pedido:
+                            remover_sem_pedido(setor, num_loja, str(data_brasilia()))
 
                 # 📝 grava a Observação Geral da Loja (embalagem/padaria/confeitaria)
                 if usa_obs:
