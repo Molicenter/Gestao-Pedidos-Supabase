@@ -1,7 +1,6 @@
-streamlit==1.40.2
-pandas==2.2.3
-requests==2.32.3
-openpyxl==3.1.5
-supabase==2.10.0
-SQLAlchemy==2.0.36
-psycopg2-binary==2.9.10
+streamlit
+pandas
+openpyxl
+SQLAlchemy
+psycopg2-binary
+supabase
