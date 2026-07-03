@@ -180,7 +180,7 @@ def buscar_estoque_erp(loja_nome, codigos_erp, setor):
     loja_id_str = f"{loja_id:03d}" 
     cods_str = ", ".join(map(str, set(codigos_erp)))
     
-    coluna_alvo = "estoqueemb" if setor == "Embalagem" else "estoque"
+    coluna_alvo = "estoqueemb" if "embalag" in _normaliza_setor(setor) else "estoque"
     
     query = f"""
         SELECT cade_codigo AS "Código", {coluna_alvo} AS "Estoque"
