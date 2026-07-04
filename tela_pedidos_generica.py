@@ -72,6 +72,17 @@ def converter_para_int_seguro(valor) -> int:
     except ValueError:
         return 0
 
+def valor_qtd_texto(valor) -> str:
+    # Normaliza uma célula de quantidade digitada em TEXTO (setores de texto:
+    # Embalagens / Matéria Prima / Padaria e Confeitaria). Aceita "1 cx", "2 fardos",
+    # "10", etc. Retorna "" quando a célula está vazia/None (aí a linha não é gravada).
+    if pd.isna(valor) or valor is None:
+        return ""
+    s = str(valor).strip()
+    if s.lower() in ("", "nan", "none", "null", "<na>", "-"):
+        return ""
+    return s
+
 def setor_usa_iceasa(setor) -> bool:
     # Cód. Iceasa só existe p/ FLV Normal e FLV Ofertas
     return str(setor).strip().lower() in ("flv normal", "flv ofertas")
@@ -180,7 +191,7 @@ def buscar_estoque_erp(loja_nome, codigos_erp, setor):
     loja_id_str = f"{loja_id:03d}" 
     cods_str = ", ".join(map(str, set(codigos_erp)))
     
-    coluna_alvo = "estoqueemb" if "embalag" in _normaliza_setor(setor) else "estoque"
+    coluna_alvo = "estoqueemb" if setor == "Embalagem" else "estoque"
     
     query = f"""
         SELECT cade_codigo AS "Código", {coluna_alvo} AS "Estoque"
@@ -1216,7 +1227,8 @@ def iniciar_tela(setor: str):
         st.markdown(f"<div class='no-print'><h2>📊 Separação e Fechamento — {setor}</h2></div>", unsafe_allow_html=True)
         
         df_prod = carregar_produtos(setor).copy()
-        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+        texto_setor = setor_pedido_texto(setor)   # Embalagens/Matéria Prima/Padaria: pedem em texto
+        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
         
         df_ped = pd.DataFrame(resp_ped.data)
         
@@ -1238,7 +1250,13 @@ def iniciar_tela(setor: str):
         exibir_status_digitacao_lojas(df_ped, lojas_sem_pedido)
         
         if not df_ped.empty:
-            df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
+            if texto_setor:
+                # setores de texto: mostra o valor digitado por loja ("1 cx"...), não soma
+                if 'quantidade_texto' not in df_ped.columns:
+                    df_ped['quantidade_texto'] = ""
+                df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade_texto', aggfunc='first').reset_index()
+            else:
+                df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
             for n in range(1, 9):
                 if n in df_pivot.columns: 
                     df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
@@ -1266,10 +1284,17 @@ def iniciar_tela(setor: str):
 
         for loja in LOJAS_NOMES:
             if loja not in df_consolidado.columns: 
-                df_consolidado[loja] = 0.0
-            df_consolidado[loja] = df_consolidado[loja].fillna(0).astype(int)
+                df_consolidado[loja] = "" if texto_setor else 0.0
+            if texto_setor:
+                df_consolidado[loja] = df_consolidado[loja].fillna("").astype(str).replace({"nan": "", "None": "", "<NA>": ""}).str.strip()
+            else:
+                df_consolidado[loja] = df_consolidado[loja].fillna(0).astype(int)
 
-        df_consolidado["TOTAL_NUM"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
+        if texto_setor:
+            # sem soma: "tem pedido" = quantas lojas preencheram (usado só p/ métrica/filtro)
+            df_consolidado["TOTAL_NUM"] = (df_consolidado[LOJAS_NOMES] != "").sum(axis=1)
+        else:
+            df_consolidado["TOTAL_NUM"] = df_consolidado[LOJAS_NOMES].sum(axis=1)
 
         st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
         col_filtro, col_metric = st.columns([3, 1])
@@ -1395,9 +1420,14 @@ def iniciar_tela(setor: str):
                         
                         lista_ins = []
                         for _, r in df_editado.iterrows():
-                            q = converter_para_int_seguro(r[loja_nome])
-                            if q > 0: 
-                                lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
+                            if texto_setor:
+                                val_txt = valor_qtd_texto(r[loja_nome])
+                                if val_txt != "":
+                                    lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": 0, "quantidade_texto": val_txt, "usuario": usuario_atual})
+                            else:
+                                q = converter_para_int_seguro(r[loja_nome])
+                                if q > 0: 
+                                    lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                         
                         if lista_ins: 
                             supabase.table("pedidos").insert(lista_ins).execute()
@@ -1461,7 +1491,7 @@ def iniciar_tela(setor: str):
         if st.session_state.pop(f"pedido_salvo_ok_{setor}_{num_loja}", None):
             modal_pedido_salvo(loja_selecionada)
 
-        st.markdown(f"<div class='no-print'><h2>📦 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
         df_prod = carregar_produtos(setor, somente_ativos=True).copy()
 
@@ -1493,7 +1523,7 @@ def iniciar_tela(setor: str):
                 st.session_state[flag_med] = True
 
         df_med = carregar_medias(num_loja).copy()
-        resp_exis = supabase.table("pedidos").select("codigo_produto, quantidade").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
+        resp_exis = supabase.table("pedidos").select("codigo_produto, quantidade, quantidade_texto").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
 
         df_exis = pd.DataFrame(resp_exis.data)
 
@@ -1518,12 +1548,22 @@ def iniciar_tela(setor: str):
         df_loja = pd.merge(df_loja, df_med, on='codigo_produto', how='left')
         df_loja['media_dia'] = df_loja['media_dia'].fillna(0.0)
 
+        usa_texto = setor_pedido_texto(setor)
+
         if not df_exis.empty:
             df_loja = pd.merge(df_loja, df_exis, on='codigo_produto', how='left')
-            df_loja['quantidade'] = df_loja['quantidade'].fillna(0).astype(int)
-            itens_digitados = df_exis[df_exis['quantidade'] > 0].shape[0]
+            if usa_texto:
+                # setores de texto: valor é string livre ("1 cx"...) vindo de quantidade_texto
+                if 'quantidade_texto' not in df_loja.columns:
+                    df_loja['quantidade_texto'] = ""
+                df_loja['qtd_display'] = df_loja['quantidade_texto'].fillna("").astype(str).replace({"nan": "", "None": "", "<NA>": ""}).str.strip()
+                itens_digitados = df_loja[df_loja['qtd_display'] != ""].shape[0]
+            else:
+                df_loja['quantidade'] = df_loja['quantidade'].fillna(0).astype(int)
+                itens_digitados = df_exis[df_exis['quantidade'] > 0].shape[0]
         else:
             df_loja['quantidade'] = 0
+            df_loja['qtd_display'] = ""
             itens_digitados = 0
 
         st.metric(label="📝 Seus Itens Preenchidos", value=f"{itens_digitados} produtos")
@@ -1538,7 +1578,9 @@ def iniciar_tela(setor: str):
             # Peças Açougue - Manoel: não há ERP para puxar estoque
             df_loja["Estoque"] = 0
         
-        df_loja['quantidade'] = df_loja['quantidade'].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
+        # Coluna de exibição "Qtde Pedida": texto livre (setores de texto) ou número (demais)
+        if not usa_texto:
+            df_loja['qtd_display'] = df_loja['quantidade'].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
 
         df_final_grid = pd.DataFrame({
             'codigo': df_loja['codigo'], 
@@ -1547,7 +1589,7 @@ def iniciar_tela(setor: str):
             'Descrição': df_loja['descricao'],
             'Média (90d)': df_loja['media_dia'], 
             'Estoque ERP': df_loja['Estoque'],
-            'Qtde Pedida': df_loja['quantidade']
+            'Qtde Pedida': df_loja['qtd_display']
         }).sort_values(by=['Fornecedor', 'Descrição'])
 
         # Embalagem/Padaria/Confeitaria/Matéria Prima: sem a coluna Média na Visão das Lojas
@@ -1638,7 +1680,7 @@ def iniciar_tela(setor: str):
         if usa_obs and (obs_loja or "").strip():
             obs_fmt = (obs_loja or "").strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
             obs_html = f'<div class="print-obs-loja"><strong>📝 Observação Geral da Loja:</strong><br>{obs_fmt}</div>'
-        st.markdown(f'<div class="print-only print-lojas"><h3>📦 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
 
         # Linha de botões. No Açougue Adriano/Especiais entra o "Sem Pedido Hoje"
         # (menor) entre Salvar e Exportar; nos demais setores a linha fica como antes.
@@ -1674,9 +1716,14 @@ def iniciar_tela(setor: str):
                     
                     lista_ins = []
                     for _, r in grid_editado.iterrows():
-                        q = converter_para_int_seguro(r["Qtde Pedida"])
-                        if q > 0: 
-                            lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
+                        if usa_texto:
+                            val_txt = valor_qtd_texto(r["Qtde Pedida"])
+                            if val_txt != "":
+                                lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": 0, "quantidade_texto": val_txt, "usuario": usuario_atual})
+                        else:
+                            q = converter_para_int_seguro(r["Qtde Pedida"])
+                            if q > 0: 
+                                lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                     
                     if lista_ins: 
                         supabase.table("pedidos").insert(lista_ins).execute()
@@ -1703,7 +1750,8 @@ def iniciar_tela(setor: str):
         st.markdown(f'<div class="print-only"><h3>🚚 Resumo por Fornecedor — {setor}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div></div>', unsafe_allow_html=True)
         
         df_prod = carregar_produtos(setor).copy()
-        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+        texto_setor = setor_pedido_texto(setor)   # Embalagens/Matéria Prima/Padaria: pedem em texto
+        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
         
         df_ped = pd.DataFrame(resp_ped.data)
 
@@ -1721,7 +1769,13 @@ def iniciar_tela(setor: str):
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
         if not df_ped.empty:
-            df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
+            if texto_setor:
+                # setores de texto: mostra o valor digitado por loja ("1 cx"...), não soma
+                if 'quantidade_texto' not in df_ped.columns:
+                    df_ped['quantidade_texto'] = ""
+                df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade_texto', aggfunc='first').reset_index()
+            else:
+                df_pivot = df_ped.pivot_table(index='codigo_produto', columns='loja', values='quantidade', aggfunc='sum').reset_index()
             for n in range(1, 9):
                 if n in df_pivot.columns: 
                     df_pivot = df_pivot.rename(columns={n: f"Loja {n:02d}"})
@@ -1732,8 +1786,11 @@ def iniciar_tela(setor: str):
         
         for l in LOJAS_NOMES:
             if l not in df_mestre.columns: 
-                df_mestre[l] = 0.0
-            df_mestre[l] = df_mestre[l].fillna(0).astype(int)
+                df_mestre[l] = "" if texto_setor else 0.0
+            if texto_setor:
+                df_mestre[l] = df_mestre[l].fillna("").astype(str).replace({"nan": "", "None": "", "<NA>": ""}).str.strip()
+            else:
+                df_mestre[l] = df_mestre[l].fillna(0).astype(int)
 
         if not df_perm_all.empty:
             df_perm_all['loja_nome'] = df_perm_all['loja'].apply(lambda x: f"Loja {int(x):02d}_perm")
@@ -1752,11 +1809,15 @@ def iniciar_tela(setor: str):
         mask_active = df_mestre[perm_cols].any(axis=1)
         df_mestre = df_mestre[mask_active]
 
-        df_mestre["TOTAL_NUM"] = df_mestre[LOJAS_NOMES].sum(axis=1)
+        if texto_setor:
+            df_mestre["TOTAL_NUM"] = (df_mestre[LOJAS_NOMES] != "").sum(axis=1)
+        else:
+            df_mestre["TOTAL_NUM"] = df_mestre[LOJAS_NOMES].sum(axis=1)
         df_mestre["TOTAL GERAL"] = df_mestre["TOTAL_NUM"].replace({0: ""})
 
         for l in LOJAS_NOMES:
-            df_mestre[l] = df_mestre[l].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
+            if not texto_setor:
+                df_mestre[l] = df_mestre[l].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
             perm_col = f"{l}_perm"
             if perm_col in df_mestre.columns: 
                 df_mestre.loc[df_mestre[perm_col] != True, l] = "-"
@@ -1848,9 +1909,14 @@ def iniciar_tela(setor: str):
                             
                             lista_ins = []
                             for _, r in df_forn_editado_full.iterrows():
-                                q = converter_para_int_seguro(r[loja_nome])
-                                if q > 0: 
-                                    lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
+                                if texto_setor:
+                                    val_txt = valor_qtd_texto(r[loja_nome])
+                                    if val_txt != "":
+                                        lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": 0, "quantidade_texto": val_txt, "usuario": usuario_atual})
+                                else:
+                                    q = converter_para_int_seguro(r[loja_nome])
+                                    if q > 0: 
+                                        lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                             
                             if lista_ins: 
                                 supabase.table("pedidos").insert(lista_ins).execute()
