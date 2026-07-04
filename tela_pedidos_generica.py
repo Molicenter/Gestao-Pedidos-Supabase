@@ -497,14 +497,11 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str, sem_total: bool = 
 # ─────────────────────────────────────────────────────────────────────────────
 # 📦 EXCEL "PEDIDO BOX" (padrão Molicenter) — exclusivo p/ FLV Normal e FLV Ofertas
 # ─────────────────────────────────────────────────────────────────────────────
-def gerar_excel_box(df: pd.DataFrame) -> bytes:
-    """Layout 'PEDIDO BOX' replicando o molicenter_final.xlsx.
+def _preencher_aba_box(ws, df: pd.DataFrame) -> None:
+    """Monta UMA aba no layout 'PEDIDO BOX' (replicando o molicenter_final.xlsx)
+    dentro do worksheet `ws` recebido. Usado tanto para aba única quanto multi-abas.
     A CODIGO (= Cód. Iceasa) | B PRODUTOS MOLICENTER | C-J 291..298 | K-P spacer oculto |
     Q TOTAL | R PREÇO | S OBS. Iceasa vazio ou > 9000 sai em branco na coluna A."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "PEDIDO BOX"
-
     # paleta exata do template
     C_LARANJA = "C55A11"   # cabeçalho
     C_VERDE   = "E2EFDA"   # lojas ímpares (banda verde)
@@ -604,6 +601,37 @@ def gerar_excel_box(df: pd.DataFrame) -> bytes:
     ws.page_margins.top = 1.0
     ws.page_margins.bottom = 1.0
 
+
+def _nome_aba_valido(nome: str) -> str:
+    # Excel: nome de aba até 31 chars e sem : \ / ? * [ ]
+    s = str(nome).strip()
+    for ch in (":", "\\", "/", "?", "*", "[", "]"):
+        s = s.replace(ch, " ")
+    return s[:31] if s else "PEDIDO"
+
+def gerar_excel_box(df: pd.DataFrame, nome_aba: str = "PEDIDO BOX") -> bytes:
+    """Excel BOX de aba única (comportamento padrão)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = _nome_aba_valido(nome_aba)
+    _preencher_aba_box(ws, df)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+def gerar_excel_box_abas(abas) -> bytes:
+    """Excel BOX com várias abas. `abas` = lista de (nome_aba, df).
+    Usado no FLV quando o filtro é 'Todos': separa Box e Pedra em abas distintas."""
+    wb = Workbook()
+    primeira = True
+    for nome_aba, df_aba in abas:
+        if primeira:
+            ws = wb.active
+            ws.title = _nome_aba_valido(nome_aba)
+            primeira = False
+        else:
+            ws = wb.create_sheet(title=_nome_aba_valido(nome_aba))
+        _preencher_aba_box(ws, df_aba)
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
@@ -1401,7 +1429,21 @@ def iniciar_tela(setor: str):
             df_export = df_editado.drop(columns=['codigo'], errors='ignore')
             # 📦 FLV Normal e FLV Ofertas usam o modelo "PEDIDO BOX"; demais setores seguem o padrão
             if str(setor).strip().lower() in ("flv normal", "flv ofertas"):
-                excel_bytes = gerar_excel_box(df_export)
+                if filtro_selecionado == "Todos" and "Fornecedor" in df_export.columns:
+                    # Filtro "Todos": separa cada grupo de fornecedor (Box, Pedra...) em sua própria aba
+                    df_g = df_export.copy()
+                    df_g["_g"] = df_g["Fornecedor"].apply(grupo_fornecedor)
+                    grupos = [g for g in sorted(df_g["_g"].dropna().unique()) if str(g).strip() != ""]
+                    abas = []
+                    for g in grupos:
+                        df_sub = df_g[df_g["_g"] == g].drop(columns=["_g"], errors="ignore")
+                        if not df_sub.empty:
+                            abas.append((f"PEDIDO {str(g).upper()}", df_sub))
+                    excel_bytes = gerar_excel_box_abas(abas) if abas else gerar_excel_box(df_export)
+                else:
+                    # Filtro específico (ex.: Box ou Pedra): aba única já com o nome do grupo
+                    nome_aba = f"PEDIDO {str(filtro_selecionado).upper()}" if filtro_selecionado != "Todos" else "PEDIDO BOX"
+                    excel_bytes = gerar_excel_box(df_export, nome_aba=nome_aba)
                 nome_arq = "molicenter.xlsx"
             else:
                 excel_bytes = gerar_excel_download(df_export, f"Fechamento {setor}", com_obs=setor_eh_materia_prima(setor))
@@ -1491,7 +1533,7 @@ def iniciar_tela(setor: str):
         if st.session_state.pop(f"pedido_salvo_ok_{setor}_{num_loja}", None):
             modal_pedido_salvo(loja_selecionada)
 
-        st.markdown(f"<div class='no-print'><h2>📦 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
         df_prod = carregar_produtos(setor, somente_ativos=True).copy()
 
@@ -1680,7 +1722,7 @@ def iniciar_tela(setor: str):
         if usa_obs and (obs_loja or "").strip():
             obs_fmt = (obs_loja or "").strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
             obs_html = f'<div class="print-obs-loja"><strong>📝 Observação Geral da Loja:</strong><br>{obs_fmt}</div>'
-        st.markdown(f'<div class="print-only print-lojas"><h3>📦 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
 
         # Linha de botões. No Açougue Adriano/Especiais entra o "Sem Pedido Hoje"
         # (menor) entre Salvar e Exportar; nos demais setores a linha fica como antes.
