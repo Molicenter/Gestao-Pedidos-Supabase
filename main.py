@@ -49,15 +49,12 @@ if 'modulo_ativo' not in st.session_state:
     st.session_state['modulo_ativo'] = 'Home'
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. CSS AVANÇADO (VISUAL EXATO + FORÇAR MENU ESQUERDO)
+# 5. CSS AVANÇADO (TEMA CLARO MOLICENTER + FORÇAR MENU ESQUERDO)
+# 🎨 O fundo e as cores base agora vêm do .streamlit/config.toml (tema claro).
+#    Este CSS cuida apenas dos componentes customizados (banner, cards, login).
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Base do Tema ── */
-.stApp, .main {
-    background-color: #0e1117 !important; /* Fundo padrão escuro */
-}
-
 /* ── Controle de Largura e Zoom (Cravado para mostrar tudo sem rolar) ── */
 .block-container {
     padding-top: 1.5rem !important;
@@ -82,7 +79,7 @@ html body section[data-testid="stSidebar"] {
     display: block !important;
 }
 
-/* ── Banner Superior Azul Escuro ── */
+/* ── Banner Superior Azul Escuro (identidade Molicenter — mantido) ── */
 .banner-container {
     background: linear-gradient(135deg, #07263b 0%, #0e4a74 100%);
     padding: 12px 24px;
@@ -91,8 +88,8 @@ html body section[data-testid="stSidebar"] {
     display: flex;
     align-items: center;
     gap: 14px;
-    box-shadow: 0 4px 15px rgba(0, 147, 233, 0.15);
-    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 4px 15px rgba(11, 61, 99, 0.20);
+    border: 1px solid rgba(11, 61, 99, 0.25);
 }
 .banner-logo {
     height: 40px;
@@ -106,16 +103,16 @@ html body section[data-testid="stSidebar"] {
     color: #fff;
 }
 
-/* ── Container dos Cards (Fundo acinzentado escuro) ── */
+/* ── Container dos Cards (branco com borda azulada, hover azul Molicenter) ── */
 div[data-testid="stVerticalBlockBorderWrapper"] {
-    background-color: #1a1c24 !important; /* Cinza escuro elegante */
+    background-color: #ffffff !important;
     border-radius: 8px !important;
-    border: 1px solid #30363d !important;
+    border: 1px solid #D5E0EA !important;
     transition: all 0.25s ease !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-    border-color: #5cb3e6 !important;
-    background-color: #1f222b !important;
+    border-color: #0093E9 !important;
+    background-color: #F7FAFD !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"] > div {
     padding: 12px !important;
@@ -129,7 +126,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div {
     border-radius: 4px;
     overflow: hidden;
     margin-bottom: 8px;
-    background-color: #0e1117;
+    background-color: #F2F6FA;
 }
 .card-img-container img {
     width: 100%;
@@ -142,11 +139,11 @@ div[data-testid="stVerticalBlockBorderWrapper"]:hover .card-img-container img {
     opacity: 1.0;
 }
 
-/* ── Botões Brancos de Título (FORÇANDO BRANCO E PRETO) ── */
+/* ── Botões de Título dos Cards (azul Molicenter sobre branco) ── */
 div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]) {
     background-color: #ffffff !important;
     background: #ffffff !important;
-    border: none !important;
+    border: 1px solid #C4D4E0 !important;
     border-radius: 4px !important;
     width: 100% !important;
     min-height: 38px !important;
@@ -154,19 +151,20 @@ div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]) {
     margin-top: 5px !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]) * {
-    color: #000000 !important; /* TEXTO PRETO */
+    color: #0B3D63 !important; /* TEXTO AZUL MOLICENTER */
     font-weight: 800 !important;
     font-size: 14px !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]):hover {
-    background-color: #e6e6e6 !important;
-    background: #e6e6e6 !important;
+    background-color: #EAF3FB !important;
+    background: #EAF3FB !important;
+    border-color: #0093E9 !important;
 }
 
 /* ── Formatação de Texto de Horários ── */
 .texto-horario {
     font-size: 12px;
-    color: #e6edf3;
+    color: #44576B;
     line-height: 1.4;
     font-weight: 500;
     min-height: 36px;
@@ -177,16 +175,16 @@ div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]):hov
     margin-top: 8px;
 }
 
-/* ── Títulos das Linhas (Setores) ── */
+/* ── Títulos das Linhas (Setores) — azul com detalhe magenta ── */
 .linha-titulo-sec {
     font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 1px;
-    color: #5cb3e6;
+    color: #0B4F7A;
     margin-bottom: 8px;
     margin-top: 15px;
     font-weight: 700;
-    border-left: 3px solid #1f8bbf;
+    border-left: 3px solid #E5007D;
     padding-left: 8px;
 }
 </style>
@@ -213,8 +211,8 @@ if st.session_state['usuario_logado'] is None:
             with title_col:
                 st.markdown("""
                     <div style='text-align:center;'>
-                        <h2 style='margin-bottom:0; color:white;'>Portal de Pedidos</h2>
-                        <p style='color:#7d8590;font-size:14px;'>Acesso Unificado — Molicenter</p>
+                        <h2 style='margin-bottom:0; color:#0B3D63;'>Portal de Pedidos</h2>
+                        <p style='color:#5F7387;font-size:14px;'>Acesso Unificado — Molicenter</p>
                     </div>
                 """, unsafe_allow_html=True)
                 
@@ -306,7 +304,7 @@ def criar_card(titulo, subtitulo, caminho_imagem, emoji_fallback, chave_modulo):
             </div>
             """, unsafe_allow_html=True)
         
-        # Botão branco com texto preto
+        # Botão branco com texto azul Molicenter
         if st.button(titulo, key=f"btn_{chave_modulo}", use_container_width=True):
             st.session_state['modulo_ativo'] = chave_modulo
             st.rerun()
@@ -358,7 +356,7 @@ def renderizar_dashboard():
     # ─────────────────────────────────────────────
     st.write("<br>", unsafe_allow_html=True)
     st.markdown("""
-    <div style="text-align:center; margin-top:20px; padding-bottom: 20px; color:#ffffff; font-size:14px; font-weight: 500;">
+    <div style="text-align:center; margin-top:20px; padding-bottom: 20px; color:#5F7387; font-size:14px; font-weight: 500;">
         Molicenter Supermercados © 2026 — Painel Web de Pedidos Centralizados
     </div>
     """, unsafe_allow_html=True)
