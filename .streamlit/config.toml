@@ -1,6 +1,21 @@
 [theme]
-primaryColor = "#0093E9"
-backgroundColor = "#121212"
-secondaryBackgroundColor = "#1e1e1e"
-textColor = "#ffffff"
+base = "light"
+primaryColor = "#E5007D"                     # magenta — botões primários (Salvar), radio, foco
+backgroundColor = "#FFFFFF"                  # área principal e células brancas
+secondaryBackgroundColor = "#F2F6FA"         # cinza-azulado — inputs, busca, zebra
+textColor = "#22303C"
+linkColor = "#0093E9"
+borderColor = "#D5E0EA"
+dataframeBorderColor = "#C4D4E0"
+dataframeHeaderBackgroundColor = "#0B3D63"   # azul Molicenter no cabeçalho das tabelas
+# Se o texto do cabeçalho ficar escuro/ilegível sobre o azul (varia com a versão),
+# troque a linha acima por esta versão suave, que mantém a identidade:
+# dataframeHeaderBackgroundColor = "#DCEBF7"
 font = "sans serif"
+
+[theme.sidebar]
+backgroundColor = "#0B3D63"                  # sidebar azul institucional
+secondaryBackgroundColor = "#14507F"         # selectbox/inputs dentro da sidebar
+textColor = "#FFFFFF"
+primaryColor = "#4FC3F7"                     # radio selecionado em azul claro (contraste no fundo escuro)
+borderColor = "#2A6693"
