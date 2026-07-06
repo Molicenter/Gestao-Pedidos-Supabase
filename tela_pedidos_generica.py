@@ -322,7 +322,7 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str, com_obs: bool = False,
             letra = get_column_letter(col_num)
             col_name = str(column_title).upper()
             if "FORNECEDOR" in col_name: 
-                worksheet.column_dimensions[letra].width = 18
+                worksheet.column_dimensions[letra].width = 30
             elif "DESCRI" in col_name or "PRODUTO" in col_name: 
                 worksheet.column_dimensions[letra].width = 45
             elif "CÓDIGO" in col_name: 
