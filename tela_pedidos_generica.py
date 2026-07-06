@@ -83,6 +83,19 @@ def valor_qtd_texto(valor) -> str:
         return ""
     return s
 
+def dedup_pedidos(df_ped: pd.DataFrame) -> pd.DataFrame:
+    # 📌 MODELO PERSISTENTE: os pedidos ficam visíveis até o "Limpar Pedidos",
+    # independente do dia em que foram digitados (setores como Embalagens/Padaria/
+    # Matéria Prima constroem o pedido ao longo de vários dias).
+    # Se o mesmo produto/loja tiver registros de datas diferentes, vale o MAIS
+    # RECENTE (maior id). A coluna data_pedido segue gravada como metadado.
+    if df_ped is None or df_ped.empty or "id" not in df_ped.columns:
+        return df_ped if df_ped is not None else pd.DataFrame()
+    chaves = [c for c in ("codigo_produto", "loja") if c in df_ped.columns]
+    if not chaves:
+        return df_ped
+    return df_ped.sort_values("id").drop_duplicates(subset=chaves, keep="last")
+
 def setor_usa_iceasa(setor) -> bool:
     # Cód. Iceasa só existe p/ FLV Normal e FLV Ofertas
     return str(setor).strip().lower() in ("flv normal", "flv ofertas")
@@ -782,35 +795,47 @@ def sincronizar_medias_setor(setor: str, view_sql: str) -> tuple:
         supabase.table("medias_90d").insert(lista_insert[i:i+1000]).execute()
     return (True, len(lista_insert), "ok")
 
-def carregar_extras(setor: str, data_str: str) -> pd.DataFrame:
-    # Preço/observação do dia (preenchidos manualmente na Separação). SEM cache, pois
+def carregar_extras(setor: str) -> pd.DataFrame:
+    # Preço/observação (preenchidos manualmente na Separação). SEM cache, pois
     # mudam quando o comprador digita e salva — precisa refletir na hora.
+    # 📌 Persistente: traz TODOS os registros do setor e mantém o MAIS RECENTE
+    # por produto (ficam visíveis até o "Limpar Pedidos", como os pedidos).
     supabase = obter_supabase()
-    resp = supabase.table("separacao_extras").select("codigo_produto, preco, observacao").eq("setor", setor).eq("data_pedido", data_str).execute()
-    return pd.DataFrame(resp.data)
+    resp = supabase.table("separacao_extras").select("codigo_produto, preco, observacao, data_pedido").eq("setor", setor).execute()
+    df = pd.DataFrame(resp.data)
+    if df.empty:
+        return df
+    df = df.sort_values("data_pedido").drop_duplicates(subset=["codigo_produto"], keep="last")
+    return df.drop(columns=["data_pedido"], errors="ignore")
 
-def carregar_obs_loja(setor: str, num_loja: int, data_str: str) -> str:
+def carregar_obs_loja(setor: str, num_loja: int) -> str:
     # Observação Geral que a própria loja digita (embalagem/padaria/confeitaria). SEM cache.
+    # 📌 Persistente: vale a mais recente, independente do dia em que foi escrita.
     supabase = obter_supabase()
-    resp = supabase.table("observacoes_lojas").select("observacao").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", data_str).execute()
+    resp = supabase.table("observacoes_lojas").select("observacao, data_pedido").eq("setor", setor).eq("loja", num_loja).order("data_pedido", desc=True).limit(1).execute()
     if resp.data:
         return (resp.data[0].get("observacao") or "")
     return ""
 
-def carregar_obs_lojas_admin(setor: str, data_str: str) -> pd.DataFrame:
-    # Todas as observações das lojas do dia, p/ o admin ver na Separação. SEM cache.
+def carregar_obs_lojas_admin(setor: str) -> pd.DataFrame:
+    # Todas as observações das lojas, p/ o admin ver na Separação. SEM cache.
+    # 📌 Persistente: mantém a mais recente de cada loja.
     supabase = obter_supabase()
-    resp = supabase.table("observacoes_lojas").select("loja, observacao").eq("setor", setor).eq("data_pedido", data_str).execute()
-    return pd.DataFrame(resp.data)
+    resp = supabase.table("observacoes_lojas").select("loja, observacao, data_pedido").eq("setor", setor).execute()
+    df = pd.DataFrame(resp.data)
+    if df.empty:
+        return df
+    df = df.sort_values("data_pedido").drop_duplicates(subset=["loja"], keep="last")
+    return df.drop(columns=["data_pedido"], errors="ignore")
 
-def salvar_obs_loja(setor: str, num_loja: int, data_str: str, texto: str, usuario: str):
-    # Regrava a observação da loja (apaga e insere se houver texto). SEM cache.
+def salvar_obs_loja(setor: str, num_loja: int, texto: str, usuario: str):
+    # Regrava a observação da loja (apaga TODAS as anteriores e insere se houver texto).
     supabase = obter_supabase()
-    supabase.table("observacoes_lojas").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", data_str).execute()
+    supabase.table("observacoes_lojas").delete().eq("setor", setor).eq("loja", num_loja).execute()
     txt = (texto or "").strip()
     if txt:
         supabase.table("observacoes_lojas").insert({
-            "data_pedido": data_str, "setor": setor, "loja": num_loja,
+            "data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja,
             "observacao": txt, "usuario": usuario
         }).execute()
 
@@ -867,9 +892,10 @@ def guardar_contra_saida(tem_alteracoes: bool):
 # ─────────────────────────────────────────────────────────────────────────────
 @st.dialog("🚨 Confirmação Necessária")
 def modal_limpar_pedidos(setor: str):
-    # Limpa os pedidos do setor no dia (todas as lojas), além de preços/observações.
-    st.markdown(f"Tem certeza que deseja **limpar todos os pedidos** de **{setor}** de hoje?")
-    st.markdown("⚠️ *Esta ação apaga os pedidos, preços/observações e observações das lojas do dia — de todas as lojas — e não pode ser desfeita.*")
+    # 📌 Fecha o CICLO do setor: apaga TODOS os pedidos pendentes (de qualquer data),
+    # além de preços/observações. É o botão que "zera a tela" no modelo persistente.
+    st.markdown(f"Tem certeza que deseja **limpar todos os pedidos** de **{setor}**?")
+    st.markdown("⚠️ *Esta ação apaga TODOS os pedidos pendentes do setor (de qualquer data), preços/observações e observações das lojas — de todas as lojas — e não pode ser desfeita.*")
     st.write("<br>", unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
@@ -879,11 +905,11 @@ def modal_limpar_pedidos(setor: str):
         if st.button("✔️ Sim, limpar tudo", type="primary", use_container_width=True, key=f"mlp_sim_{setor}"):
             supabase = obter_supabase()
             with st.spinner("Limpando..."):
-                supabase.table("pedidos").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
-                supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
-                supabase.table("observacoes_lojas").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+                supabase.table("pedidos").delete().eq("setor", setor).execute()
+                supabase.table("separacao_extras").delete().eq("setor", setor).execute()
+                supabase.table("observacoes_lojas").delete().eq("setor", setor).execute()
                 try:
-                    supabase.table("sem_pedido_hoje").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+                    supabase.table("sem_pedido_hoje").delete().eq("setor", setor).execute()
                 except Exception:
                     pass
             # reseta o editor p/ não ficar 'None' preso em células que foram apagadas
@@ -892,7 +918,7 @@ def modal_limpar_pedidos(setor: str):
 
 @st.dialog("🚫 Confirmação — Sem Pedido Hoje")
 def modal_sem_pedido(setor: str, num_loja: int, loja_selecionada: str):
-    # Zera o pedido da loja no dia e avisa o supervisor no Telegram.
+    # Zera o pedido pendente da loja (de qualquer data) e avisa o supervisor no Telegram.
     st.markdown(f"Confirma que a **{loja_selecionada}** **NÃO** fará pedido hoje?")
     st.markdown("⚠️ *Isso apaga o que estiver lançado e avisa o supervisor no Telegram.*")
     st.write("<br>", unsafe_allow_html=True)
@@ -904,7 +930,7 @@ def modal_sem_pedido(setor: str, num_loja: int, loja_selecionada: str):
         if st.button("✔️ Sim, sem pedido hoje", type="primary", use_container_width=True, key=f"msp_sim_{setor}_{num_loja}"):
             supabase = obter_supabase()
             with st.spinner("Registrando 'Sem Pedido Hoje'..."):
-                supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
+                supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).execute()
                 # registra a declaração p/ a loja ficar VERDE ("Sem Pedido") na Separação
                 registrar_sem_pedido(setor, num_loja, str(data_brasilia()), st.session_state.get('usuario_logado', loja_selecionada))
                 msg_aviso = (
@@ -1256,9 +1282,10 @@ def iniciar_tela(setor: str):
         
         df_prod = carregar_produtos(setor).copy()
         texto_setor = setor_pedido_texto(setor)   # Embalagens/Matéria Prima/Padaria: pedem em texto
-        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+        # 📌 Persistente: SEM filtro de data — mostra tudo que está pendente
+        resp_ped = supabase.table("pedidos").select("id, codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).execute()
         
-        df_ped = pd.DataFrame(resp_ped.data)
+        df_ped = dedup_pedidos(pd.DataFrame(resp_ped.data))
         
         if df_prod.empty: 
             st.warning("Nenhum produto cadastrado para este setor.")
@@ -1360,11 +1387,11 @@ def iniciar_tela(setor: str):
         if usa_iceasa and "Cód. Iceasa" not in df_consolidado.columns:
             df_consolidado["Cód. Iceasa"] = None
 
-        # 💲 Preço/Observação do dia: FLV tem Preço+Observação; Matéria Prima tem só Observação.
+        # 💲 Preço/Observação: FLV tem Preço+Observação; Matéria Prima tem só Observação.
         # Tudo guardado em separacao_extras (sem tabela nova) e mapeado por 'codigo'.
         cols_extras = []
         if usa_iceasa or eh_mp:
-            df_extras = carregar_extras(setor, str(data_brasilia()))
+            df_extras = carregar_extras(setor)
             mapa_obs = dict(zip(df_extras["codigo_produto"], df_extras["observacao"])) if not df_extras.empty else {}
             df_consolidado["Observação"] = df_consolidado["codigo"].map(mapa_obs).fillna("").astype(str).replace({"None": "", "nan": "", "<NA>": ""})
             if usa_iceasa:
@@ -1458,7 +1485,8 @@ def iniciar_tela(setor: str):
                 if cods:
                     for loja_nome in LOJAS_NOMES:
                         n_loja = int(loja_nome.split()[-1])
-                        supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods).execute()
+                        # 📌 Persistente: apaga o pendente da loja p/ estes produtos (qualquer data)
+                        supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).in_("codigo_produto", cods).execute()
                         
                         lista_ins = []
                         for _, r in df_editado.iterrows():
@@ -1474,10 +1502,10 @@ def iniciar_tela(setor: str):
                         if lista_ins: 
                             supabase.table("pedidos").insert(lista_ins).execute()
 
-                    # 💲 Preço/Observação do dia: FLV grava Preço+Obs; Matéria Prima grava só Obs.
+                    # 💲 Preço/Observação: FLV grava Preço+Obs; Matéria Prima grava só Obs.
                     if usa_iceasa or eh_mp:
                         for i in range(0, len(cods), 200):
-                            supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods[i:i+200]).execute()
+                            supabase.table("separacao_extras").delete().eq("setor", setor).in_("codigo_produto", cods[i:i+200]).execute()
                         lista_extras = []
                         for _, r in df_editado.iterrows():
                             preco_val = celula_para_preco(r.get("R$ Preço")) if usa_iceasa else None
@@ -1494,7 +1522,7 @@ def iniciar_tela(setor: str):
 
         # 📝 Observações das Lojas (embalagem/padaria/confeitaria): o admin vê o recado de cada loja
         if setor_usa_obs_loja(setor) and acesso_total:
-            df_obs = carregar_obs_lojas_admin(setor, str(data_brasilia()))
+            df_obs = carregar_obs_lojas_admin(setor)
             st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
             st.markdown(f"<div class='no-print'><h3>📝 Observações das Lojas — {data_hora_brasilia()}</h3></div>", unsafe_allow_html=True)
             if df_obs is not None and not df_obs.empty:
@@ -1511,7 +1539,7 @@ def iniciar_tela(setor: str):
                 html_obs = df_obs.to_html(index=False, classes="print-table")
                 st.markdown(f'<div class="print-only"><h3>📝 Observações das Lojas</h3>{html_obs}</div>', unsafe_allow_html=True)
             else:
-                st.info("Nenhuma loja registrou observação para hoje.")
+                st.info("Nenhuma loja registrou observação.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 2 — VISÃO DAS LOJAS
@@ -1533,7 +1561,7 @@ def iniciar_tela(setor: str):
         if st.session_state.pop(f"pedido_salvo_ok_{setor}_{num_loja}", None):
             modal_pedido_salvo(loja_selecionada)
 
-        st.markdown(f"<div class='no-print'><h2>📦 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='no-print'><h2>🥬 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
         
         df_prod = carregar_produtos(setor, somente_ativos=True).copy()
 
@@ -1565,13 +1593,17 @@ def iniciar_tela(setor: str):
                 st.session_state[flag_med] = True
 
         df_med = carregar_medias(num_loja).copy()
-        resp_exis = supabase.table("pedidos").select("codigo_produto, quantidade, quantidade_texto").eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).execute()
+        # 📌 Persistente: SEM filtro de data — o pedido pendente da loja aparece
+        # até ser salvo por cima, zerado ("Sem Pedido") ou limpo pelo admin.
+        resp_exis = supabase.table("pedidos").select("id, codigo_produto, quantidade, quantidade_texto").eq("setor", setor).eq("loja", num_loja).execute()
 
-        df_exis = pd.DataFrame(resp_exis.data)
+        df_exis = dedup_pedidos(pd.DataFrame(resp_exis.data))
+        if df_exis is not None and not df_exis.empty:
+            df_exis = df_exis.drop(columns=["id"], errors="ignore")
 
         # 📝 Observação Geral da Loja — só embalagem/padaria/confeitaria
         usa_obs = setor_usa_obs_loja(setor)
-        obs_atual = carregar_obs_loja(setor, num_loja, str(data_brasilia())) if usa_obs else ""
+        obs_atual = carregar_obs_loja(setor, num_loja) if usa_obs else ""
 
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
@@ -1722,7 +1754,7 @@ def iniciar_tela(setor: str):
         if usa_obs and (obs_loja or "").strip():
             obs_fmt = (obs_loja or "").strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
             obs_html = f'<div class="print-obs-loja"><strong>📝 Observação Geral da Loja:</strong><br>{obs_fmt}</div>'
-        st.markdown(f'<div class="print-only print-lojas"><h3>📦 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="print-only print-lojas"><h3>🥬 Pedido Oficial — {loja_selecionada}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}{obs_html}</div>', unsafe_allow_html=True)
 
         # Linha de botões. No Açougue Adriano/Especiais entra o "Sem Pedido Hoje"
         # (menor) entre Salvar e Exportar; nos demais setores a linha fica como antes.
@@ -1737,7 +1769,7 @@ def iniciar_tela(setor: str):
         if c_sem is not None:
             with c_sem:
                 # Abre a janela de confirmação centralizada (modal). Só no "Sim" é que
-                # zera o pedido da loja no dia e dispara o aviso no Telegram.
+                # zera o pedido da loja e dispara o aviso no Telegram.
                 if st.button(
                     "🚫 Sem Pedido Hoje",
                     use_container_width=True,
@@ -1754,7 +1786,8 @@ def iniciar_tela(setor: str):
             with st.spinner("Gravando pedido..."):
                 cods_tela = grid_editado["codigo"].tolist()
                 if cods_tela:
-                    supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods_tela).execute()
+                    # 📌 Persistente: apaga o pendente destes produtos (qualquer data) antes de regravar
+                    supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).in_("codigo_produto", cods_tela).execute()
                     
                     lista_ins = []
                     for _, r in grid_editado.iterrows():
@@ -1775,7 +1808,7 @@ def iniciar_tela(setor: str):
 
                 # 📝 grava a Observação Geral da Loja (embalagem/padaria/confeitaria)
                 if usa_obs:
-                    salvar_obs_loja(setor, num_loja, str(data_brasilia()), obs_loja, usuario_atual)
+                    salvar_obs_loja(setor, num_loja, obs_loja, usuario_atual)
             # limpa o estado dos editores (todas as variações de filtro) p/ o guarda desligar
             for _k in [k for k in list(st.session_state.keys()) if str(k).startswith(f"grid_loja_{num_loja}")]:
                 st.session_state.pop(_k, None)
@@ -1793,9 +1826,10 @@ def iniciar_tela(setor: str):
         
         df_prod = carregar_produtos(setor).copy()
         texto_setor = setor_pedido_texto(setor)   # Embalagens/Matéria Prima/Padaria: pedem em texto
-        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
+        # 📌 Persistente: SEM filtro de data — mostra tudo que está pendente
+        resp_ped = supabase.table("pedidos").select("id, codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).execute()
         
-        df_ped = pd.DataFrame(resp_ped.data)
+        df_ped = dedup_pedidos(pd.DataFrame(resp_ped.data))
 
         if df_prod.empty: 
             st.info("Nenhum produto cadastrado.")
@@ -1872,7 +1906,7 @@ def iniciar_tela(setor: str):
         eh_mp = setor_eh_materia_prima(setor)
         mapa_obs_mp = {}
         if eh_mp:
-            df_extras_mp = carregar_extras(setor, str(data_brasilia()))
+            df_extras_mp = carregar_extras(setor)
             if not df_extras_mp.empty:
                 mapa_obs_mp = dict(zip(df_extras_mp["codigo_produto"], df_extras_mp["observacao"]))
         for forn in sorted(df_mestre["fornecedor"].dropna().unique()):
@@ -1947,7 +1981,8 @@ def iniciar_tela(setor: str):
                     if cods:
                         for loja_nome in LOJAS_NOMES:
                             n_loja = int(loja_nome.split()[-1])
-                            supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods).execute()
+                            # 📌 Persistente: apaga o pendente da loja p/ estes produtos (qualquer data)
+                            supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).in_("codigo_produto", cods).execute()
                             
                             lista_ins = []
                             for _, r in df_forn_editado_full.iterrows():
@@ -1966,7 +2001,7 @@ def iniciar_tela(setor: str):
                         # 📝 Observação por produto (só Matéria Prima) → separacao_extras
                         if eh_mp:
                             for i in range(0, len(cods), 200):
-                                supabase.table("separacao_extras").delete().eq("setor", setor).eq("data_pedido", str(data_brasilia())).in_("codigo_produto", cods[i:i+200]).execute()
+                                supabase.table("separacao_extras").delete().eq("setor", setor).in_("codigo_produto", cods[i:i+200]).execute()
                             lista_extras = []
                             for _, r in df_forn_editado_full.iterrows():
                                 obs_raw = r.get("Observação")
@@ -1996,17 +2031,18 @@ def iniciar_tela(setor: str):
             df_prod['codigo_iceasa'] = None
         df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
 
-        # Pedidos de hoje → quantidade por loja e total por produto
-        resp_ped = supabase.table("pedidos").select("codigo_produto, loja, quantidade").eq("setor", setor).eq("data_pedido", str(data_brasilia())).execute()
-        df_ped = pd.DataFrame(resp_ped.data)
+        # Pedidos pendentes → quantidade por loja e total por produto
+        # 📌 Persistente: SEM filtro de data — usa o que estiver lançado
+        resp_ped = supabase.table("pedidos").select("id, codigo_produto, loja, quantidade").eq("setor", setor).execute()
+        df_ped = dedup_pedidos(pd.DataFrame(resp_ped.data))
         qtd_por_loja, total_por_cod = {}, {}
         if not df_ped.empty:
             for cod, grp in df_ped.groupby("codigo_produto"):
                 qtd_por_loja[int(cod)] = {int(r["loja"]): int(r["quantidade"]) for _, r in grp.iterrows()}
                 total_por_cod[int(cod)] = int(grp["quantidade"].sum())
 
-        # Preços do dia (da Separação)
-        df_extras = carregar_extras(setor, str(data_brasilia()))
+        # Preços (da Separação)
+        df_extras = carregar_extras(setor)
         preco_por_cod = dict(zip(df_extras["codigo_produto"], df_extras["preco"])) if not df_extras.empty else {}
 
         desc_por_cod = dict(zip(df_prod["codigo"], df_prod["descricao"]))
