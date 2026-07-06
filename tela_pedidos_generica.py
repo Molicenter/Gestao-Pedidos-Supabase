@@ -131,10 +131,12 @@ def setor_usa_erp(setor) -> bool:
     return not setor_eh_pecas_manoel(setor)
 
 def grupo_fornecedor(forn) -> str:
-    # Agrupa os fornecedores "BIG FRANGO - *" sob um único rótulo de filtro "BIG FRANGO".
-    # A coluna Fornecedor continua mostrando o nome completo de cada tipo (Mix Balcão etc.).
+    # Agrupa fornecedores com múltiplos tipos ("BIG FRANGO - *", "PIONEIRO - *")
+    # sob um único rótulo de filtro. A coluna Fornecedor mantém o nome completo de cada tipo.
     if _normaliza_setor(forn).startswith("big frango"):
         return "BIG FRANGO"
+    if _normaliza_setor(forn).startswith("pioneiro"):
+        return "PIONEIRO"
     return str(forn).strip()
 
 # Views de média no ERP (período base de 90 dias)
