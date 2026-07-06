@@ -897,7 +897,10 @@ def modal_limpar_pedidos(setor: str):
     # 📌 Fecha o CICLO do setor: apaga TODOS os pedidos pendentes (de qualquer data),
     # além de preços/observações. É o botão que "zera a tela" no modelo persistente.
     st.markdown(f"Tem certeza que deseja **limpar todos os pedidos** de **{setor}**?")
-    st.markdown("⚠️ *Esta ação apaga TODOS os pedidos pendentes do setor (de qualquer data), preços/observações e observações das lojas — de todas as lojas — e não pode ser desfeita.*")
+    if setor_eh_materia_prima(setor):
+        st.markdown("⚠️ *Esta ação apaga TODOS os pedidos pendentes do setor (de qualquer data) e as observações das lojas. As **observações por produto serão mantidas**. Não pode ser desfeita.*")
+    else:
+        st.markdown("⚠️ *Esta ação apaga TODOS os pedidos pendentes do setor (de qualquer data), preços/observações e observações das lojas — de todas as lojas — e não pode ser desfeita.*")
     st.write("<br>", unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
@@ -908,7 +911,10 @@ def modal_limpar_pedidos(setor: str):
             supabase = obter_supabase()
             with st.spinner("Limpando..."):
                 supabase.table("pedidos").delete().eq("setor", setor).execute()
-                supabase.table("separacao_extras").delete().eq("setor", setor).execute()
+                # Matéria Prima: preserva as observações por produto (separacao_extras) ao limpar.
+                # Nos demais setores, preço/observação são do ciclo e são apagados normalmente.
+                if not setor_eh_materia_prima(setor):
+                    supabase.table("separacao_extras").delete().eq("setor", setor).execute()
                 supabase.table("observacoes_lojas").delete().eq("setor", setor).execute()
                 try:
                     supabase.table("sem_pedido_hoje").delete().eq("setor", setor).execute()
@@ -1950,7 +1956,9 @@ def iniciar_tela(setor: str):
                 edit_df = st.data_editor(df_forn_view, hide_index=True, use_container_width=False, column_config=col_cfg_f, key=f"editor_forn_{forn}")
                 
                 # Impressão: p/ FLV o código mostrado é o Iceasa (ERP sai), com regra >9000/vazio
-                df_forn_print = df_forn_view.drop(columns=['codigo', 'Observação'], errors='ignore').fillna('')
+                # Matéria Prima mantém a coluna Observação na impressão; demais setores não a têm.
+                cols_drop_print = ['codigo'] if eh_mp else ['codigo', 'Observação']
+                df_forn_print = df_forn_view.drop(columns=cols_drop_print, errors='ignore').fillna('')
                 if usa_iceasa:
                     df_forn_print['Cód. Iceasa'] = df_forn_print['Cód. Iceasa'].apply(iceasa_para_impressao)
                     df_forn_print = df_forn_print.drop(columns=['Cód. ERP'], errors='ignore')
