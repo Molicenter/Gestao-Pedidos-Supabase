@@ -55,6 +55,34 @@ def data_hora_brasilia() -> str:
     agora = datetime.now(timezone.utc) - timedelta(hours=3)
     return agora.strftime("%d/%m/%Y %H:%M")
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔢 ORDEM CUSTOMIZADA DE FORNECEDORES (por setor) — fonte única da verdade.
+# A ordem fica na tabela Supabase `ordem_fornecedores` (setor, fornecedor, ordem)
+# e é definida pelo admin na mini-tela "Ordenar Fornecedores". Todo lugar que
+# antes fazia sorted(fornecedor) passa a chamar ordenar_fornecedores(). Fornecedor
+# SEM ordem definida cai no fim, em ordem alfabética. Assim, se alguém renomear um
+# fornecedor no Catálogo, ele só aparece no fim até o admin reposicioná-lo 1x.
+# ─────────────────────────────────────────────────────────────────────────────
+_ORDEM_NAO_DEFINIDA = 10**6  # fornecedor fora da tabela → vai pro fim
+
+@st.cache_data(ttl=300)
+def carregar_ordem_fornecedores(setor: str) -> dict:
+    # {nome_fornecedor: ordem} para o setor. Cache curto (5 min); é limpo ao salvar.
+    try:
+        supabase = obter_supabase()
+        resp = supabase.table("ordem_fornecedores").select("fornecedor, ordem").eq("setor", setor).execute()
+        return {r["fornecedor"]: r["ordem"] for r in (resp.data or [])}
+    except Exception:
+        # Se a tabela ainda não existir ou der erro, cai no comportamento antigo (alfabético).
+        return {}
+
+def ordenar_fornecedores(nomes, setor: str) -> list:
+    # Recebe uma lista/array de nomes de fornecedores e devolve ordenada:
+    # 1) pela "ordem" salva (menor primeiro); 2) empate/sem-ordem → alfabético.
+    mapa = carregar_ordem_fornecedores(setor)
+    limpos = [n for n in dict.fromkeys(nomes) if n is not None and str(n).strip() != ""]
+    return sorted(limpos, key=lambda n: (mapa.get(n, _ORDEM_NAO_DEFINIDA), str(n).lower()))
+
 conn_pg = st.connection("banco_erp", type="sql")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -364,7 +392,7 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str, com_obs: bool = False,
 
     return output.getvalue()
 
-def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str, sem_total: bool = False, com_obs: bool = False) -> bytes:
+def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str, sem_total: bool = False, com_obs: bool = False, setor: str = "") -> bytes:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         worksheet = writer.book.create_sheet(nome_aba[:30])
@@ -429,7 +457,7 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str, sem_total: bool = 
         current_row = 2
         lojas_cols = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
         
-        forns = sorted(df["fornecedor"].dropna().unique())
+        forns = ordenar_fornecedores(df["fornecedor"].dropna().unique(), setor)
         for forn in forns:
             df_f = df[df["fornecedor"] == forn]
             
@@ -1244,6 +1272,18 @@ def iniciar_tela(setor: str):
             </style>
         """, unsafe_allow_html=True)
 
+    # 🔥 PAISAGEM NA "VISÃO FORNECEDORES (RESUMO)" — SÓ NO LOGIN DE ADMINISTRADOR 🔥
+    # As lojas nunca chegam nesta view (só têm "Visão das Lojas"), mas mantemos o
+    # acesso_total explícito para deixar a regra clara: loja imprime em retrato.
+    if acesso_total and perfil_navegacao == "Visão Fornecedores (Resumo)":
+        st.markdown("""
+            <style>
+            @media print {
+                @page { size: landscape; margin: 10mm; }
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
     if acesso_total:
         with st.sidebar:
             st.markdown("---")
@@ -1365,7 +1405,7 @@ def iniciar_tela(setor: str):
             # Agrupa "BIG FRANGO - *" sob o rótulo "BIG FRANGO" (igual à Visão das Lojas).
             # A coluna Fornecedor segue mostrando o tipo específico de cada produto.
             df_consolidado["_grupo_forn"] = df_consolidado['fornecedor'].apply(grupo_fornecedor)
-            opcoes_forn = ["Todos"] + sorted([g for g in df_consolidado["_grupo_forn"].dropna().unique() if str(g).strip() != ""])
+            opcoes_forn = ["Todos"] + ordenar_fornecedores([g for g in df_consolidado["_grupo_forn"].dropna().unique() if str(g).strip() != ""], setor)
             filtro_selecionado = st.radio("🔍 Filtrar Exibição por Setor:", options=opcoes_forn, horizontal=True)
 
         if filtro_selecionado != "Todos": 
@@ -1468,7 +1508,7 @@ def iniciar_tela(setor: str):
                     # Filtro "Todos": separa cada grupo de fornecedor (Box, Pedra...) em sua própria aba
                     df_g = df_export.copy()
                     df_g["_g"] = df_g["Fornecedor"].apply(grupo_fornecedor)
-                    grupos = [g for g in sorted(df_g["_g"].dropna().unique()) if str(g).strip() != ""]
+                    grupos = [g for g in ordenar_fornecedores(df_g["_g"].dropna().unique(), setor) if str(g).strip() != ""]
                     abas = []
                     for g in grupos:
                         df_sub = df_g[df_g["_g"] == g].drop(columns=["_g"], errors="ignore")
@@ -1687,7 +1727,7 @@ def iniciar_tela(setor: str):
         # mostrando o tipo específico. Só aparece quando há mais de um fornecedor.
         filtro_forn = "Todos"
         df_final_grid["_grupo_forn"] = df_final_grid["Fornecedor"].apply(grupo_fornecedor)
-        grupos_forn = ["Todos"] + sorted(df_final_grid["_grupo_forn"].dropna().unique().tolist())
+        grupos_forn = ["Todos"] + ordenar_fornecedores(df_final_grid["_grupo_forn"].dropna().unique().tolist(), setor)
         if len(grupos_forn) > 2:
             filtro_forn = st.radio("🔍 Filtrar por Fornecedor:", options=grupos_forn, horizontal=True, key=f"filtro_forn_loja_{setor}_{num_loja}")
             if filtro_forn != "Todos":
@@ -1917,7 +1957,46 @@ def iniciar_tela(setor: str):
             df_extras_mp = carregar_extras(setor)
             if not df_extras_mp.empty:
                 mapa_obs_mp = dict(zip(df_extras_mp["codigo_produto"], df_extras_mp["observacao"]))
-        for forn in sorted(df_mestre["fornecedor"].dropna().unique()):
+        # ⚙️ Mini-tela ADMIN: define a ordem de aparição dos fornecedores (número).
+        # Só admin vê/edita. Vale p/ os cards, a impressão e o Excel deste setor.
+        if acesso_total:
+            with st.expander("⚙️ Ordenar Fornecedores (ordem de aparição na tela/impressão)", expanded=False):
+                st.caption("Menor número aparece primeiro. Fornecedor sem número definido vai pro fim, "
+                           "em ordem alfabética. A ordem vale para os cards, a impressão e o Excel deste setor.")
+                _forns_setor = ordenar_fornecedores(df_mestre["fornecedor"].dropna().unique(), setor)
+                _mapa_ordem = carregar_ordem_fornecedores(setor)
+                _df_ordem = pd.DataFrame({
+                    "Fornecedor": _forns_setor,
+                    "Ordem": [int(_mapa_ordem.get(f, 999)) for f in _forns_setor],
+                })
+                _edit_ordem = st.data_editor(
+                    _df_ordem, hide_index=True, use_container_width=False,
+                    column_config={
+                        "Fornecedor": st.column_config.TextColumn(disabled=True, width=320),
+                        "Ordem": st.column_config.NumberColumn(
+                            min_value=0, step=1, width=90, format="%d",
+                            help="Ordem de aparição. Menor = aparece primeiro."),
+                    },
+                    key=f"editor_ordem_forn_{setor}",
+                )
+                if st.button("💾 Salvar Ordem dos Fornecedores", type="primary",
+                             key=f"salvar_ordem_forn_{setor}"):
+                    try:
+                        _registros = [
+                            {"setor": setor, "fornecedor": str(r["Fornecedor"]),
+                             "ordem": int(r["Ordem"]) if pd.notna(r["Ordem"]) else 999}
+                            for _, r in _edit_ordem.iterrows()
+                        ]
+                        supabase.table("ordem_fornecedores").upsert(
+                            _registros, on_conflict="setor,fornecedor"
+                        ).execute()
+                        st.cache_data.clear()
+                        st.success("Ordem salva! ✅")
+                        st.rerun()
+                    except Exception as _e:
+                        st.error(f"Não consegui salvar a ordem: {_e}")
+
+        for forn in ordenar_fornecedores(df_mestre["fornecedor"].dropna().unique(), setor):
             df_forn_bruto = df_mestre[df_mestre["fornecedor"] == forn]
             lojas_ativas = [l for l in LOJAS_NOMES if not (df_forn_bruto[l] == "-").all()]
             if usa_iceasa:
@@ -1981,7 +2060,7 @@ def iniciar_tela(setor: str):
                 btn_salvar_forn = st.button("💾 Salvar Ajustes do Resumo", type="primary", use_container_width=True)
             with c_excel:
                 df_export = df_forn_editado_full.drop(columns=['codigo'], errors='ignore')
-                st.download_button("📊 Exportar Fornecedores", data=gerar_excel_fornecedores(df_export, f"Fornecedores", sem_total=texto_setor, com_obs=setor_eh_materia_prima(setor)), file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
+                st.download_button("📊 Exportar Fornecedores", data=gerar_excel_fornecedores(df_export, f"Fornecedores", sem_total=texto_setor, com_obs=setor_eh_materia_prima(setor), setor=setor), file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
             with c_print: 
                 injetar_botao_impressao()
 
