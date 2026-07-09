@@ -1244,18 +1244,6 @@ def iniciar_tela(setor: str):
             </style>
         """, unsafe_allow_html=True)
 
-    # 🔥 PAISAGEM NA "VISÃO FORNECEDORES (RESUMO)" — SÓ NO LOGIN DE ADMINISTRADOR 🔥
-    # As lojas nunca chegam nesta view (só têm "Visão das Lojas"), mas mantemos o
-    # acesso_total explícito para deixar a regra clara: loja imprime em retrato.
-    if acesso_total and perfil_navegacao == "Visão Fornecedores (Resumo)":
-        st.markdown("""
-            <style>
-            @media print {
-                @page { size: landscape; margin: 10mm; }
-            }
-            </style>
-        """, unsafe_allow_html=True)
-
     if acesso_total:
         with st.sidebar:
             st.markdown("---")
