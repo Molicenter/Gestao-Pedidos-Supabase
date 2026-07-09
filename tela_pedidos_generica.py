@@ -991,6 +991,46 @@ def modal_pedido_salvo(loja_selecionada: str):
     if st.button("👍 Fechar", type="primary", use_container_width=True, key=f"modal_salvo_fechar_{loja_selecionada}"):
         st.rerun()
 
+@st.dialog("⚙️ Ordenar Fornecedores", width="large")
+def modal_ordenar_fornecedores(setor: str, fornecedores_lista: list):
+    st.caption("Menor número aparece primeiro. Fornecedor sem número definido vai pro fim, em ordem alfabética. A ordem vale para os cards, a impressão e o Excel deste setor.")
+    
+    _forns_setor = ordenar_fornecedores(fornecedores_lista, setor)
+    _mapa_ordem = carregar_ordem_fornecedores(setor)
+    _df_ordem = pd.DataFrame({
+        "Fornecedor": _forns_setor,
+        "Ordem": [int(_mapa_ordem.get(f, 999)) for f in _forns_setor],
+    })
+    
+    _edit_ordem = st.data_editor(
+        _df_ordem, hide_index=True, use_container_width=True,
+        column_config={
+            "Fornecedor": st.column_config.TextColumn(disabled=True),
+            "Ordem": st.column_config.NumberColumn(
+                min_value=0, step=1, format="%d",
+                help="Ordem de aparição. Menor = aparece primeiro."),
+        },
+        key=f"editor_ordem_forn_{setor}_modal",
+    )
+    
+    if st.button("💾 Salvar Ordem dos Fornecedores", type="primary", use_container_width=True, key=f"salvar_ordem_forn_{setor}_modal"):
+        try:
+            supabase = obter_supabase()
+            _registros = [
+                {"setor": setor, "fornecedor": str(r["Fornecedor"]),
+                 "ordem": int(r["Ordem"]) if pd.notna(r["Ordem"]) else 999}
+                for _, r in _edit_ordem.iterrows()
+            ]
+            supabase.table("ordem_fornecedores").upsert(
+                _registros, on_conflict="setor,fornecedor"
+            ).execute()
+            st.cache_data.clear()
+            st.success("Ordem salva! ✅")
+            time.sleep(1)
+            st.rerun()
+        except Exception as _e:
+            st.error(f"Não consegui salvar a ordem: {_e}")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🧠 FUNÇÃO DIRETORA DO MÓDULO UNIFICADO
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1957,44 +1997,6 @@ def iniciar_tela(setor: str):
             df_extras_mp = carregar_extras(setor)
             if not df_extras_mp.empty:
                 mapa_obs_mp = dict(zip(df_extras_mp["codigo_produto"], df_extras_mp["observacao"]))
-        # ⚙️ Mini-tela ADMIN: define a ordem de aparição dos fornecedores (número).
-        # Só admin vê/edita. Vale p/ os cards, a impressão e o Excel deste setor.
-        if acesso_total:
-            with st.expander("⚙️ Ordenar Fornecedores (ordem de aparição na tela/impressão)", expanded=False):
-                st.caption("Menor número aparece primeiro. Fornecedor sem número definido vai pro fim, "
-                           "em ordem alfabética. A ordem vale para os cards, a impressão e o Excel deste setor.")
-                _forns_setor = ordenar_fornecedores(df_mestre["fornecedor"].dropna().unique(), setor)
-                _mapa_ordem = carregar_ordem_fornecedores(setor)
-                _df_ordem = pd.DataFrame({
-                    "Fornecedor": _forns_setor,
-                    "Ordem": [int(_mapa_ordem.get(f, 999)) for f in _forns_setor],
-                })
-                _edit_ordem = st.data_editor(
-                    _df_ordem, hide_index=True, use_container_width=False,
-                    column_config={
-                        "Fornecedor": st.column_config.TextColumn(disabled=True, width=320),
-                        "Ordem": st.column_config.NumberColumn(
-                            min_value=0, step=1, width=90, format="%d",
-                            help="Ordem de aparição. Menor = aparece primeiro."),
-                    },
-                    key=f"editor_ordem_forn_{setor}",
-                )
-                if st.button("💾 Salvar Ordem dos Fornecedores", type="primary",
-                             key=f"salvar_ordem_forn_{setor}"):
-                    try:
-                        _registros = [
-                            {"setor": setor, "fornecedor": str(r["Fornecedor"]),
-                             "ordem": int(r["Ordem"]) if pd.notna(r["Ordem"]) else 999}
-                            for _, r in _edit_ordem.iterrows()
-                        ]
-                        supabase.table("ordem_fornecedores").upsert(
-                            _registros, on_conflict="setor,fornecedor"
-                        ).execute()
-                        st.cache_data.clear()
-                        st.success("Ordem salva! ✅")
-                        st.rerun()
-                    except Exception as _e:
-                        st.error(f"Não consegui salvar a ordem: {_e}")
 
         for forn in ordenar_fornecedores(df_mestre["fornecedor"].dropna().unique(), setor):
             df_forn_bruto = df_mestre[df_mestre["fornecedor"] == forn]
@@ -2339,12 +2341,18 @@ def iniciar_tela(setor: str):
         st.markdown(f'<div class="print-only"><h3>🗂️ Catálogo Geral — {setor}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}</div>', unsafe_allow_html=True)
 
         st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
-        col_btn_salvar, col_btn_erp = st.columns(2)
+        col_btn_salvar, col_btn_erp, col_btn_ordenar = st.columns(3)
         
         with col_btn_salvar: 
             btn_salvar = st.button("💾 Salvar Matriz do Catálogo", type="primary", use_container_width=True)
         with col_btn_erp: 
             btn_puxar_erp = st.button("📥 Puxar Nomes do ERP", use_container_width=True)
+        with col_btn_ordenar:
+            btn_ordenar = st.button("⚙️ Ordenar Fornecedores", use_container_width=True)
+
+        if btn_ordenar:
+            fornecedores_unicos = df_cat_completo["fornecedor"].dropna().unique().tolist()
+            modal_ordenar_fornecedores(setor, fornecedores_unicos)
 
         if btn_salvar:
             state = st.session_state.get("catalogo_editor")
