@@ -194,7 +194,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]):hov
 # 6. TELA DE LOGIN ÚNICA DO PORTAL (MAIOR E QUADRADA)
 # ─────────────────────────────────────────────────────────────────────────────
 if st.session_state['usuario_logado'] is None:
-    st.write(<br><br><br>"", unsafe_allow_html=True)"
+    st.write("<br><br><br>", unsafe_allow_html=True)
     
     # Aumentando a largura da coluna central para 1.8 (deixa a caixa mais imponente)
     _, col2, _ = st.columns([1, 1, 1])
