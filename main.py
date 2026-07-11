@@ -15,7 +15,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. IMPORTAÇÃO DOS MÓDULOS (Enxuta: apenas a tela genérica unificada)
 # ─────────────────────────────────────────────────────────────────────────────
-import tela_pedidos_generica # <-- Apenas este arquivo cuidará de todos os setores!
+import tela_pedidos_generica  # <-- Apenas este arquivo cuidará de todos os setores!
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. LINKS E VARIÁVEIS DE IMAGENS EXTERNAS
@@ -33,9 +33,9 @@ def imagem_para_b64(caminho):
     try:
         with open(caminho, "rb") as f:
             encoded = base64.b64encode(f.read()).decode()
-            ext = caminho.split('.')[-1].lower()
-            mime = "image/png" if ext == "png" else "image/jpeg"
-            return f"data:{mime};base64,{encoded}"
+        ext = caminho.split('.')[-1].lower()
+        mime = "image/png" if ext == "png" else "image/jpeg"
+        return f"data:{mime};base64,{encoded}"
     except:
         return ""
 
@@ -44,43 +44,127 @@ def imagem_para_b64(caminho):
 # ─────────────────────────────────────────────────────────────────────────────
 if 'usuario_logado' not in st.session_state:
     st.session_state['usuario_logado'] = None
-
 if 'modulo_ativo' not in st.session_state:
     st.session_state['modulo_ativo'] = 'Home'
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 🎨 CORES POR SEÇÃO (Opção A — faixa superior + botão tintado)
+# Cada card pertence a um grupo de cor. O CSS é GERADO a partir deste mapa,
+# então pra recolorir uma seção inteira basta trocar os hex aqui.
+#   faixa  = cor forte da faixa de 5px no topo do card
+#   borda  = borda suave do card e do botão-título
+#   fundo  = fundo clarinho do botão-título
+#   texto  = cor do NOME do setor (tom escuro da MESMA família → legível
+#            em qualquer tema; fundo e texto sempre fixados JUNTOS)
+#   hover  = fundo do botão ao passar o mouse
+# ─────────────────────────────────────────────────────────────────────────────
+CORES_SECOES = {
+    "verde": {  # 🥦 Hortifruti (FLV)
+        "faixa": "#2E9E5B", "borda": "#BFE3CC", "fundo": "#E8F5EC",
+        "texto": "#14532D", "hover": "#D3EDDD",
+    },
+    "coral": {  # 🥩 Açougue e Aves
+        "faixa": "#D85A30", "borda": "#F0C4B0", "fundo": "#FAECE7",
+        "texto": "#7C2D12", "hover": "#F6DCCF",
+    },
+    "ambar": {  # 📦 Outros Setores e Logística
+        "faixa": "#EF9F27", "borda": "#F5D9A8", "fundo": "#FAEEDA",
+        "texto": "#713F12", "hover": "#F5E3BF",
+    },
+}
+
+# Qual card (pela key do botão) pertence a qual grupo de cor
+GRUPO_DOS_CARDS = {
+    "btn_flv_folhagem":      "verde",
+    "btn_flv_normal":        "verde",
+    "btn_flv_ofertas":       "verde",
+    "btn_flv_oriental":      "verde",
+    "btn_acougue_especiais": "coral",
+    "btn_acougue_total":     "coral",
+    "btn_acougue_pecas":     "coral",
+    "btn_embalagem":         "ambar",
+    "btn_padaria_confeitaria": "ambar",
+    "btn_materia_prima":     "ambar",
+}
+
+def _css_cards_coloridos() -> str:
+    """Gera as regras CSS por card usando as classes .st-key-<key> que o
+    Streamlit adiciona a todo widget com key. O seletor :has() colore o
+    CONTAINER do card a partir do botão que está dentro dele."""
+    regras = []
+    for key, grupo in GRUPO_DOS_CARDS.items():
+        c = CORES_SECOES[grupo]
+        # Card inteiro: borda tintada + faixa de 5px no topo
+        regras.append(f"""
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.st-key-{key}) {{
+            border: 1px solid {c['borda']} !important;
+            border-top: 5px solid {c['faixa']} !important;
+            border-radius: 8px !important;
+        }}
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.st-key-{key}):hover {{
+            border-color: {c['faixa']} !important;
+            border-top-color: {c['faixa']} !important;
+            background-color: #FDFEFE !important;
+        }}""")
+        # Botão-título: fundo clarinho + NOME em tom escuro da mesma família.
+        # Fundo e cor do texto SEMPRE fixados juntos (nunca herdar do tema),
+        # senão o nome some no modo escuro do navegador.
+        regras.append(f"""
+        div[data-testid="stVerticalBlockBorderWrapper"] .st-key-{key} button:not([kind="primary"]) {{
+            background-color: {c['fundo']} !important;
+            background: {c['fundo']} !important;
+            border: 1px solid {c['borda']} !important;
+        }}
+        div[data-testid="stVerticalBlockBorderWrapper"] .st-key-{key} button:not([kind="primary"]) * {{
+            color: {c['texto']} !important;
+        }}
+        div[data-testid="stVerticalBlockBorderWrapper"] .st-key-{key} button:not([kind="primary"]):hover {{
+            background-color: {c['hover']} !important;
+            background: {c['hover']} !important;
+            border-color: {c['faixa']} !important;
+        }}""")
+    # Títulos das seções: barra lateral e texto na cor do grupo
+    for grupo, c in CORES_SECOES.items():
+        regras.append(f"""
+        .linha-titulo-sec.sec-{grupo} {{
+            color: {c['texto']};
+            border-left: 4px solid {c['faixa']};
+        }}""")
+    return "\n".join(regras)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 5. CSS AVANÇADO (TEMA CLARO MOLICENTER + FORÇAR MENU ESQUERDO)
 # 🎨 O fundo e as cores base agora vêm do .streamlit/config.toml (tema claro).
-#    Este CSS cuida apenas dos componentes customizados (banner, cards, login).
+# Este CSS cuida apenas dos componentes customizados (banner, cards, login).
 # ─────────────────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(f"""
 <style>
 /* ── Controle de Largura e Zoom (Cravado para mostrar tudo sem rolar) ── */
-.block-container {
+.block-container {{
     padding-top: 1.5rem !important;
     padding-bottom: 1rem !important;
     max-width: 95% !important;
     zoom: 0.90 !important; /* Ajuste fino: compacto para os cards, mas legível no login */
-}
+}}
 
 /* Ocultar Menu e Rodapé, MAS DEIXAR O CABEÇALHO TRANSPARENTE */
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {background-color: transparent !important;} 
+#MainMenu {{visibility: hidden;}}
+footer {{visibility: hidden;}}
+header {{background-color: transparent !important;}}
 
 /* ── MÁGICA: FORÇAR O MENU ESQUERDO A APARECER PARA AS LOJAS ── */
 /* Isso anula as travas escondidas dentro dos outros 9 arquivos dos setores */
-html body [data-testid="collapsedControl"] {
+html body [data-testid="collapsedControl"] {{
     display: flex !important;
     visibility: visible !important;
     z-index: 99999 !important;
-}
-html body section[data-testid="stSidebar"] {
+}}
+html body section[data-testid="stSidebar"] {{
     display: block !important;
-}
+}}
 
 /* ── Banner Superior Azul Escuro (identidade Molicenter — mantido) ── */
-.banner-container {
+.banner-container {{
     background: linear-gradient(135deg, #07263b 0%, #0e4a74 100%);
     padding: 12px 24px;
     border-radius: 8px;
@@ -90,57 +174,58 @@ html body section[data-testid="stSidebar"] {
     gap: 14px;
     box-shadow: 0 4px 15px rgba(11, 61, 99, 0.20);
     border: 1px solid rgba(11, 61, 99, 0.25);
-}
-.banner-logo {
+}}
+.banner-logo {{
     height: 40px;
     width: auto;
     object-fit: contain;
-}
-.banner-title {
+}}
+.banner-title {{
     font-family: 'Segoe UI', Tahoma, sans-serif;
     font-size: 22px;
     font-weight: 800;
     color: #fff;
-}
+}}
 
-/* ── Container dos Cards (branco com borda azulada, hover azul Molicenter) ── */
-div[data-testid="stVerticalBlockBorderWrapper"] {
+/* ── Container dos Cards (base branca; a cor por seção vem das regras geradas) ── */
+div[data-testid="stVerticalBlockBorderWrapper"] {{
     background-color: #ffffff !important;
     border-radius: 8px !important;
     border: 1px solid #D5E0EA !important;
     transition: all 0.25s ease !important;
-}
-div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+    overflow: hidden !important; /* faixa do topo respeita o raio do card */
+}}
+div[data-testid="stVerticalBlockBorderWrapper"]:hover {{
     border-color: #0093E9 !important;
     background-color: #F7FAFD !important;
-}
-div[data-testid="stVerticalBlockBorderWrapper"] > div {
+}}
+div[data-testid="stVerticalBlockBorderWrapper"] > div {{
     padding: 12px !important;
     gap: 6px !important;
-}
+}}
 
 /* ── Imagem do Card ── */
-.card-img-container {
+.card-img-container {{
     width: 100%;
-    height: 120px; 
+    height: 120px;
     border-radius: 4px;
     overflow: hidden;
     margin-bottom: 8px;
     background-color: #F2F6FA;
-}
-.card-img-container img {
+}}
+.card-img-container img {{
     width: 100%;
     height: 100%;
     object-fit: cover;
     opacity: 0.95;
     transition: opacity 0.3s;
-}
-div[data-testid="stVerticalBlockBorderWrapper"]:hover .card-img-container img {
+}}
+div[data-testid="stVerticalBlockBorderWrapper"]:hover .card-img-container img {{
     opacity: 1.0;
-}
+}}
 
-/* ── Botões de Título dos Cards (azul Molicenter sobre branco) ── */
-div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]) {
+/* ── Botões de Título dos Cards (base; cor final vem das regras por seção) ── */
+div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]) {{
     background-color: #ffffff !important;
     background: #ffffff !important;
     border: 1px solid #C4D4E0 !important;
@@ -149,20 +234,20 @@ div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]) {
     min-height: 38px !important;
     padding: 6px 12px !important;
     margin-top: 5px !important;
-}
-div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]) * {
-    color: #0B3D63 !important; /* TEXTO AZUL MOLICENTER */
+}}
+div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]) * {{
+    color: #0B3D63 !important; /* fallback azul Molicenter */
     font-weight: 800 !important;
     font-size: 14px !important;
-}
-div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]):hover {
+}}
+div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]):hover {{
     background-color: #EAF3FB !important;
     background: #EAF3FB !important;
     border-color: #0093E9 !important;
-}
+}}
 
 /* ── Formatação de Texto de Horários ── */
-.texto-horario {
+.texto-horario {{
     font-size: 12px;
     color: #44576B;
     line-height: 1.4;
@@ -173,10 +258,10 @@ div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]):hov
     justify-content: center;
     text-align: center;
     margin-top: 8px;
-}
+}}
 
-/* ── Títulos das Linhas (Setores) — azul com detalhe magenta ── */
-.linha-titulo-sec {
+/* ── Títulos das Linhas (Setores) — base; cor final vem de .sec-<grupo> ── */
+.linha-titulo-sec {{
     font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 1px;
@@ -186,7 +271,10 @@ div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]):hov
     font-weight: 700;
     border-left: 3px solid #E5007D;
     padding-left: 8px;
-}
+}}
+
+/* ── 🎨 OPÇÃO A: regras geradas por seção (faixa, borda, botão e título) ── */
+{_css_cards_coloridos()}
 </style>
 """, unsafe_allow_html=True)
 
@@ -194,20 +282,21 @@ div[data-testid="stVerticalBlockBorderWrapper"] button:not([kind="primary"]):hov
 # 6. TELA DE LOGIN ÚNICA DO PORTAL (MAIOR E QUADRADA)
 # ─────────────────────────────────────────────────────────────────────────────
 if st.session_state['usuario_logado'] is None:
+
     st.write("<br><br><br>", unsafe_allow_html=True)
-    
+
     # Aumentando a largura da coluna central para 1.8 (deixa a caixa mais imponente)
     _, col2, _ = st.columns([1, 1, 1])
-    
+
     with col2:
         with st.container(border=True):
             # Espaço extra interno para deixar "quadrado"
             st.write("<br>", unsafe_allow_html=True)
-            
+
             # --- INÍCIO DA MUDANÇA: Sub-colunas para alinhar Título e Logo ---
             # Proporção 1:4:1 para manter o texto centralizado na caixa
             _, title_col, logo_col = st.columns([1, 4, 1])
-            
+
             with title_col:
                 st.markdown("""
                     <div style='text-align:center;'>
@@ -215,21 +304,22 @@ if st.session_state['usuario_logado'] is None:
                         <p style='color:#5F7387;font-size:14px;'>Acesso Unificado — Molicenter</p>
                     </div>
                 """, unsafe_allow_html=True)
-                
+
             with logo_col:
                 # Opcional: Adicionar um pequeno espaço para alinhar verticalmente com o texto
-                st.write("") 
+                st.write("")
                 try:
                     st.image("passaro_logo.png", width=60)
                 except Exception:
                     # Centralizando o emoji para caso a imagem falhe
                     st.markdown("<div style='text-align:center; font-size:30px;'>🥬</div>", unsafe_allow_html=True)
             # --- FIM DA MUDANÇA ---
-        
+
             st.divider()
-            
+
             LOJAS_LOGIN = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
             usuarios_permitidos = ["Selecione...", "Administrador"] + LOJAS_LOGIN
+
             usuario_selecionado = st.selectbox("👤 Usuário de acesso:", usuarios_permitidos)
             senha_digitada = st.text_input("🔑 Senha de acesso:", type="password", autocomplete="off")
 
@@ -251,8 +341,8 @@ if st.session_state['usuario_logado'] is None:
                       if (inp.value && !inp.dataset.__synced) {
                         inp.dataset.__synced = '1';
                         const setter = Object.getOwnPropertyDescriptor(
-                            win.HTMLInputElement.prototype, 'value').set;
-                        setter.call(inp, inp.value);                 // valor preenchido pelo navegador
+                          win.HTMLInputElement.prototype, 'value').set;
+                        setter.call(inp, inp.value);   // valor preenchido pelo navegador
                         inp.dispatchEvent(new Event('input', { bubbles: true })); // Streamlit registra
                       }
                     });
@@ -263,7 +353,7 @@ if st.session_state['usuario_logado'] is None:
                 """,
                 height=0,
             )
-            
+
             st.write("<br>", unsafe_allow_html=True)
 
             if st.button("Entrar no Sistema", type="primary", use_container_width=True):
@@ -280,8 +370,9 @@ if st.session_state['usuario_logado'] is None:
                 else:
                     # Rede de segurança: senha veio vazia (ex.: autofill não captado)
                     st.warning("⚠️ Digite a senha. Se ela foi preenchida automaticamente pelo navegador, clique no campo e tecle uma vez antes de entrar.")
-            
+
             st.write("<br>", unsafe_allow_html=True)
+
     st.stop()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -289,48 +380,47 @@ if st.session_state['usuario_logado'] is None:
 # ─────────────────────────────────────────────────────────────────────────────
 def criar_card(titulo, subtitulo, caminho_imagem, emoji_fallback, chave_modulo):
     img_src = imagem_para_b64(caminho_imagem)
-    
     with st.container(border=True):
         if img_src:
             st.markdown(f"""
-            <div class="card-img-container">
-                <img src="{img_src}">
-            </div>
+                <div class="card-img-container">
+                    <img src="{img_src}">
+                </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
-            <div class="card-img-container" style="display:flex; justify-content:center; align-items:center;">
-                <span style="font-size: 40px;">{emoji_fallback}</span>
-            </div>
+                <div class="card-img-container" style="display:flex; justify-content:center; align-items:center;">
+                    <span style="font-size: 40px;">{emoji_fallback}</span>
+                </div>
             """, unsafe_allow_html=True)
-        
-        # Botão branco com texto azul Molicenter
+
+        # Botão-título (cores por seção aplicadas via CSS .st-key-btn_<modulo>)
         if st.button(titulo, key=f"btn_{chave_modulo}", use_container_width=True):
             st.session_state['modulo_ativo'] = chave_modulo
             st.rerun()
-            
+
         st.markdown(f'<div class="texto-horario">{subtitulo}</div>', unsafe_allow_html=True)
 
 def renderizar_dashboard():
     logo_src = imagem_para_b64("passaro_logo.png")
     img_tag = f'<img src="{logo_src}" class="banner-logo" alt="Logo">' if logo_src else '<span style="font-size:28px">🛒</span>'
-    
+
     # 1. Pegamos a loja/usuário que está logado
     loja_logada = st.session_state.get('usuario_logado', '')
-    
+
     # 2. Injetamos a variável {loja_logada} no banner
     st.markdown(f"""
-    <div class="banner-container">
-        {img_tag}
-        <div class="banner-title">
-            Gestão Pedidos - Molicenter 
-            <span style="font-size: 18px; font-weight: 500; color: #a5d8ff;">&nbsp; ---> Visão: {loja_logada}</span>
+        <div class="banner-container">
+            {img_tag}
+            <div class="banner-title">
+                Gestão Pedidos - Molicenter
+                <span style="font-size: 18px; font-weight: 500; color: #a5d8ff;">&nbsp; ---> Visão: {loja_logada}</span>
+            </div>
         </div>
-    </div>
     """, unsafe_allow_html=True)
 
     # --- LINHA 1 ---
-    st.markdown('<div class="linha-titulo-sec">🥦 Setor Hortifruti (FLV)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="linha-titulo-sec sec-verde">🥦 Setor Hortifruti (FLV)</div>', unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4, gap="medium")
     with c1: criar_card("Folhagem", "Seg a Sáb até 12:00hrs", IMG_FOLHAGEM, "🥬", "flv_folhagem")
     with c2: criar_card("FLV Normal", "Terças-feira até 17:00hrs<br>Quintas-feira até 14:00hrs", IMG_FLV, "🍎", "flv_normal")
@@ -338,14 +428,14 @@ def renderizar_dashboard():
     with c4: criar_card("FLV Oriental", "Quintas-feiras até 14:00hrs", IMG_ORIENTAL, "🍣", "flv_oriental")
 
     # --- LINHA 2 ---
-    st.markdown('<div class="linha-titulo-sec">🥩 Setor Açougue e Aves</div>', unsafe_allow_html=True)
+    st.markdown('<div class="linha-titulo-sec sec-coral">🥩 Setor Açougue e Aves</div>', unsafe_allow_html=True)
     c1, c2, c3, _ = st.columns(4, gap="medium")
     with c1: criar_card("Pioneiro + BF + Paraná", "Seg a Sex até 11:00hrs", "Pioneiros.jpg", "🍗", "acougue_especiais")
     with c2: criar_card("Açougue Adriano", "Quartas-feira até 15:00hrs<br>Sábado até 15:00hrs", IMG_ACOUGUE, "🔪", "acougue_total")
     with c3: criar_card("Peças Açougue - Manoel", "Seg/Qua/Sex - Arap. 15:00h<br>Ter/Qui/Sáb - Maringá 15:00h", IMG_ACOUGUE, "🥩", "acougue_pecas")
 
     # --- LINHA 3 ---
-    st.markdown('<div class="linha-titulo-sec">📦 Outros Setores e Logística</div>', unsafe_allow_html=True)
+    st.markdown('<div class="linha-titulo-sec sec-ambar">📦 Outros Setores e Logística</div>', unsafe_allow_html=True)
     c1, c2, c3, _ = st.columns(4, gap="medium")
     with c1: criar_card("Embalagens", "Sexta-feira até as 17:30hrs", "Embalagens.jpg", "🥡", "embalagem")
     with c2: criar_card("Padaria e Confeitaria", "Sábado", IMG_PADARIA, "🥖", "padaria_confeitaria")
@@ -356,9 +446,9 @@ def renderizar_dashboard():
     # ─────────────────────────────────────────────
     st.write("<br>", unsafe_allow_html=True)
     st.markdown("""
-    <div style="text-align:center; margin-top:20px; padding-bottom: 20px; color:#5F7387; font-size:14px; font-weight: 500;">
-        Molicenter Supermercados © 2026 — Painel Web de Pedidos Centralizados
-    </div>
+        <div style="text-align:center; margin-top:20px; padding-bottom: 20px; color:#5F7387; font-size:14px; font-weight: 500;">
+            Molicenter Supermercados © 2026 — Painel Web de Pedidos Centralizados
+        </div>
     """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -394,7 +484,6 @@ else:
     }
 
     modulo_atual = st.session_state['modulo_ativo']
-    
     if modulo_atual in MAPA_SETORES_SUPABASE:
         # Chama a tela única passando o nome do setor por parâmetro
         tela_pedidos_generica.iniciar_tela(setor=MAPA_SETORES_SUPABASE[modulo_atual])
