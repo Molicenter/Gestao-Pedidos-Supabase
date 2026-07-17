@@ -227,22 +227,19 @@ def celula_para_preco(s):
         return None
 
 def buscar_estoque_erp(loja_nome, codigos_erp, setor):
-    if not codigos_erp: 
+    if not codigos_erp:
         return pd.DataFrame(columns=["Código", "Estoque"])
-        
     loja_id = int(loja_nome.split()[-1])
-    loja_id_str = f"{loja_id:03d}" 
+    loja_id_str = f"{loja_id:03d}"
     cods_str = ", ".join(map(str, set(codigos_erp)))
-    
-    coluna_alvo = "estoqueemb" if setor == "Embalagem" else "estoque"
-    
+    coluna_alvo = "estoqueemb" if "embalag" in _normaliza_setor(setor) else "estoque"
     query = f"""
         SELECT cade_codigo AS "Código", {coluna_alvo} AS "Estoque"
         FROM python_estoque WHERE cade_codempresa = '{loja_id_str}' AND cade_codigo IN ({cods_str})
     """
-    try: 
-        return conn_pg.query(query, ttl=30) 
-    except Exception as e: 
+    try:
+        return conn_pg.query(query, ttl=30)
+    except Exception as e:
         st.error(f"Erro ao buscar estoque: {e}")
         return pd.DataFrame({"Código": codigos_erp, "Estoque": 0})
 
