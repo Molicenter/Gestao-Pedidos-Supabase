@@ -154,6 +154,11 @@ def setor_eh_pecas_manoel(setor) -> bool:
     # Peças Açougue - Manoel: NÃO tem código ERP, nem estoque do ERP, nem média 90d.
     return "manoel" in _normaliza_setor(setor)
 
+def setor_eh_flores(setor) -> bool:
+    # Flores: numérico como o Açougue Adriano (média semanal + estoque de vendas do ERP),
+    # mas exibe Cód. Barra no lugar do Fornecedor e tem link de foto do produto.
+    return "flores" in _normaliza_setor(setor)
+
 def setor_usa_erp(setor) -> bool:
     # Setores ligados ao ERP (têm Cód. ERP e puxam estoque). Peças Manoel não usa.
     return not setor_eh_pecas_manoel(setor)
@@ -350,6 +355,8 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str, com_obs: bool = False,
                 worksheet.column_dimensions[letra].width = 30
             elif "DESCRI" in col_name or "PRODUTO" in col_name: 
                 worksheet.column_dimensions[letra].width = 45
+            elif "BARRA" in col_name:
+                worksheet.column_dimensions[letra].width = 16
             elif "CÓDIGO" in col_name: 
                 worksheet.column_dimensions[letra].width = 12
             elif "MÉDIA" in col_name or "ESTOQUE" in col_name: 
@@ -773,7 +780,10 @@ def buscar_permissoes_setor(_supabase_client, codigos_setor, num_loja=None):
 def carregar_produtos(setor: str, somente_ativos: bool = False) -> pd.DataFrame:
     # Catálogo do setor (muda pouco durante o dia). Cacheado por (setor, somente_ativos).
     supabase = obter_supabase()
-    q = supabase.table("produtos").select("codigo, codigo_erp, codigo_iceasa, descricao, fornecedor, nome_personalizado").eq("setor", setor)
+    campos = "codigo, codigo_erp, codigo_iceasa, descricao, fornecedor, nome_personalizado"
+    if setor_eh_flores(setor):
+        campos += ", codigo_barra, link_foto"   # colunas extras exclusivas do setor Flores
+    q = supabase.table("produtos").select(campos).eq("setor", setor)
     if somente_ativos:
         q = q.eq("ativo", True)
     resp = q.execute()
@@ -1489,7 +1499,18 @@ def iniciar_tela(setor: str):
         # Matéria Prima/Embalagem/Padaria: sem coluna Total (pedem em texto)
         # Matéria Prima/Embalagem/Padaria: sem coluna Total em tudo (tela, Excel e impressão)
         cols_total = [] if texto_setor else ["TOTAL GERAL"]
-        df_exibicao = df_consolidado[["Fornecedor", "codigo"] + cols_cod + ["Descrição"] + LOJAS_NOMES + cols_total + cols_extras].sort_values(by=['Fornecedor', 'Descrição'])
+        eh_flores = setor_eh_flores(setor)
+        if eh_flores:
+            # 🌸 Flores: a coluna Fornecedor sai (fornecedor único) e entra o Cód. Barra
+            # (mantido como TEXTO para preservar os zeros à esquerda).
+            df_consolidado["Cód. Barra"] = (df_consolidado["codigo_barra"] if "codigo_barra" in df_consolidado.columns else "")
+            df_consolidado["Cód. Barra"] = df_consolidado["Cód. Barra"].fillna("").astype(str).replace({"nan": "", "None": ""})
+            cols_ini = ["Cód. Barra", "codigo"]
+            ordem_sep = "Descrição"
+        else:
+            cols_ini = ["Fornecedor", "codigo"]
+            ordem_sep = ["Fornecedor", "Descrição"]
+        df_exibicao = df_consolidado[cols_ini + cols_cod + ["Descrição"] + LOJAS_NOMES + cols_total + cols_extras].sort_values(by=ordem_sep)
 
         col_cfg = {
             "codigo": None, 
@@ -1499,6 +1520,8 @@ def iniciar_tela(setor: str):
             "Descrição": st.column_config.TextColumn(disabled=True, width=175), 
             "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=56)
         }
+        if eh_flores:
+            col_cfg["Cód. Barra"] = st.column_config.TextColumn("Cód. Barra", disabled=True, width=118)
         if usa_iceasa:
             col_cfg["R$ Preço"] = st.column_config.TextColumn("R$ Preço", width=88, help="Preço do dia (ex.: 12,50). Deixe vazio se não houver.")
             col_cfg["Observação"] = st.column_config.TextColumn("Observação", width=145)
@@ -1741,15 +1764,30 @@ def iniciar_tela(setor: str):
         if not usa_texto:
             df_loja['qtd_display'] = df_loja['quantidade'].replace({0: ""}).astype(str).replace({"0": "", "0.0": "", "nan": ""})
 
-        df_final_grid = pd.DataFrame({
-            'codigo': df_loja['codigo'], 
+        eh_flores = setor_eh_flores(setor)
+        dados_grid = {
+            'codigo': df_loja['codigo'],
             'Cód. ERP': df_loja['codigo_erp'],
-            'Fornecedor': df_loja['fornecedor'], 
-            'Descrição': df_loja['descricao'],
-            'Média (90d)': df_loja['media_dia'], 
-            'Estoque ERP': df_loja['Estoque'],
-            'Qtde Pedida': df_loja['qtd_display']
-        }).sort_values(by=['Fornecedor', 'Descrição'])
+        }
+        if eh_flores:
+            # 🌸 Flores: Cód. Barra no lugar do Fornecedor + coluna Foto com o link da imagem
+            dados_grid['Cód. Barra'] = (df_loja['codigo_barra'] if 'codigo_barra' in df_loja.columns else "")
+            dados_grid['Foto'] = (df_loja['link_foto'] if 'link_foto' in df_loja.columns else "")
+        else:
+            dados_grid['Fornecedor'] = df_loja['fornecedor']
+        dados_grid['Descrição'] = df_loja['descricao']
+        dados_grid['Média (90d)'] = df_loja['media_dia']
+        dados_grid['Estoque ERP'] = df_loja['Estoque']
+        dados_grid['Qtde Pedida'] = df_loja['qtd_display']
+        df_final_grid = pd.DataFrame(dados_grid)
+        if eh_flores:
+            df_final_grid['Cód. Barra'] = df_final_grid['Cód. Barra'].fillna("").astype(str).replace({"nan": "", "None": ""})
+            # links vazios ou "-" (produto sem foto) ficam em branco → sem botão de foto
+            df_final_grid['Foto'] = df_final_grid['Foto'].fillna("").astype(str).replace({"nan": "", "None": "", "-": ""}).str.strip()
+            df_final_grid.loc[~df_final_grid['Foto'].str.startswith("http"), 'Foto'] = None
+            df_final_grid = df_final_grid.sort_values(by='Descrição')
+        else:
+            df_final_grid = df_final_grid.sort_values(by=['Fornecedor', 'Descrição'])
 
         # Embalagem/Padaria/Confeitaria/Matéria Prima: sem a coluna Média na Visão das Lojas
         if not usa_media:
@@ -1763,8 +1801,11 @@ def iniciar_tela(setor: str):
         # entram todos sob o mesmo rótulo "BIG FRANGO"; a coluna Fornecedor segue
         # mostrando o tipo específico. Só aparece quando há mais de um fornecedor.
         filtro_forn = "Todos"
-        df_final_grid["_grupo_forn"] = df_final_grid["Fornecedor"].apply(grupo_fornecedor)
-        grupos_forn = ["Todos"] + ordenar_fornecedores(df_final_grid["_grupo_forn"].dropna().unique().tolist(), setor)
+        if "Fornecedor" in df_final_grid.columns:
+            df_final_grid["_grupo_forn"] = df_final_grid["Fornecedor"].apply(grupo_fornecedor)
+            grupos_forn = ["Todos"] + ordenar_fornecedores(df_final_grid["_grupo_forn"].dropna().unique().tolist(), setor)
+        else:
+            grupos_forn = ["Todos"]   # Flores: fornecedor único, sem filtro
         if len(grupos_forn) > 2:
             filtro_forn = st.radio("🔍 Filtrar por Fornecedor:", options=grupos_forn, horizontal=True, key=f"filtro_forn_loja_{setor}_{num_loja}")
             if filtro_forn != "Todos":
@@ -1777,6 +1818,8 @@ def iniciar_tela(setor: str):
             mask = df_final_grid['Descrição'].str.lower().str.contains(tb, na=False)
             if 'Cód. ERP' in df_final_grid.columns:
                 mask = mask | df_final_grid['Cód. ERP'].astype(str).str.contains(tb, na=False)
+            if 'Cód. Barra' in df_final_grid.columns:
+                mask = mask | df_final_grid['Cód. Barra'].astype(str).str.contains(tb, na=False)
             df_filtrado = df_final_grid[mask]
         else:
             df_filtrado = df_final_grid
@@ -1790,6 +1833,12 @@ def iniciar_tela(setor: str):
             "Média (90d)": st.column_config.NumberColumn("Média", disabled=True, format="%.2f", width=72),
             "Qtde Pedida": st.column_config.TextColumn("Qtde", width=85)
         }
+        if eh_flores:
+            col_cfg_l["Cód. Barra"] = st.column_config.TextColumn("Cód. Barra", disabled=True, width=118)
+            col_cfg_l["Foto"] = st.column_config.LinkColumn(
+                "Foto", display_text="📷 Ver", disabled=True, width=72,
+                help="Clique para abrir a foto do produto em outra aba."
+            )
 
         # use_container_width=False: as colunas respeitam a largura definida e não
         # "esticam" para preencher a tela (igual à Visão Fornecedores). Fica bem mais
@@ -1833,7 +1882,7 @@ def iniciar_tela(setor: str):
         obs_mudou = usa_obs and (obs_loja or "").strip() != (obs_atual or "").strip()
         guardar_contra_saida((orig_q != edit_q) or obs_mudou)
 
-        df_print_loja = df_filtrado.drop(columns=['codigo'], errors='ignore').fillna('').rename(columns={'Qtde Pedida': 'Pedido'})
+        df_print_loja = df_filtrado.drop(columns=['codigo', 'Foto'], errors='ignore').fillna('').rename(columns={'Qtde Pedida': 'Pedido'})
         html_table = df_print_loja.to_html(index=False, classes="print-table")
         obs_html = ""
         if usa_obs and (obs_loja or "").strip():
@@ -1862,7 +1911,7 @@ def iniciar_tela(setor: str):
                 ):
                     modal_sem_pedido(setor, num_loja, loja_selecionada)
         with c_excel:
-            df_export = grid_editado.drop(columns=['codigo'], errors='ignore')
+            df_export = grid_editado.drop(columns=['codigo', 'Foto'], errors='ignore')
             st.download_button("📊 Exportar Excel", data=gerar_excel_download(df_export, f"Pedido", obs_rodape=(obs_loja if usa_obs else "")), file_name=f"Pedido_{loja_selecionada}.xlsx", use_container_width=True)
         with c_print: 
             injetar_botao_impressao()
@@ -1989,6 +2038,9 @@ def iniciar_tela(setor: str):
         usa_erp = setor_usa_erp(setor)
         texto_setor = setor_pedido_texto(setor)   # Matéria Prima/Embalagem/Padaria: sem Total na tela
         eh_mp = setor_eh_materia_prima(setor)
+        eh_flores = setor_eh_flores(setor)
+        if eh_flores and "codigo_barra" in df_mestre.columns:
+            df_mestre["codigo_barra"] = df_mestre["codigo_barra"].fillna("").astype(str).replace({"nan": "", "None": ""})
         mapa_obs_mp = {}
         if eh_mp:
             df_extras_mp = carregar_extras(setor)
@@ -2007,7 +2059,9 @@ def iniciar_tela(setor: str):
             if usa_iceasa and "codigo_iceasa" not in df_forn_bruto.columns:
                 df_forn_bruto = df_forn_bruto.assign(codigo_iceasa=None)
             cols_total_f = [] if texto_setor else ["TOTAL GERAL"]
-            df_forn_view = df_forn_bruto[["codigo"] + cols_cod_f + ["descricao"] + lojas_ativas + cols_total_f].rename(columns={'codigo_erp': 'Cód. ERP', 'codigo_iceasa': 'Cód. Iceasa', 'descricao': 'Produto'}).sort_values(by='Produto')
+            # 🌸 Flores: Cód. Barra entra logo antes do nome do Produto
+            cols_barra_f = ["codigo_barra"] if (eh_flores and "codigo_barra" in df_forn_bruto.columns) else []
+            df_forn_view = df_forn_bruto[["codigo"] + cols_cod_f + cols_barra_f + ["descricao"] + lojas_ativas + cols_total_f].rename(columns={'codigo_erp': 'Cód. ERP', 'codigo_iceasa': 'Cód. Iceasa', 'codigo_barra': 'Cód. Barra', 'descricao': 'Produto'}).sort_values(by='Produto')
             if eh_mp:
                 df_forn_view["Observação"] = df_forn_view["codigo"].map(mapa_obs_mp).fillna("").astype(str).replace({"None": "", "nan": "", "<NA>": ""})
             
@@ -2020,6 +2074,8 @@ def iniciar_tela(setor: str):
                     "Produto": st.column_config.TextColumn(disabled=True, width=250),
                     "TOTAL GERAL": st.column_config.TextColumn("TOTAL", disabled=True, width=70)
                 }
+                if eh_flores:
+                    col_cfg_f["Cód. Barra"] = st.column_config.TextColumn("Cód. Barra", disabled=True, width=118)
                 for l in lojas_ativas: 
                     col_cfg_f[l] = st.column_config.TextColumn(l, width=85, disabled=False)
                 if eh_mp:
@@ -2059,7 +2115,13 @@ def iniciar_tela(setor: str):
                 btn_salvar_forn = st.button("💾 Salvar Ajustes do Resumo", type="primary", use_container_width=True)
             with c_excel:
                 df_export = df_forn_editado_full.drop(columns=['codigo'], errors='ignore')
-                st.download_button("📊 Exportar Fornecedores", data=gerar_excel_fornecedores(df_export, f"Fornecedores", sem_total=texto_setor, com_obs=setor_eh_materia_prima(setor), setor=setor), file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
+                if setor_eh_flores(setor):
+                    # 🌸 Flores: motor genérico (o layout fixo do gerar_excel_fornecedores não comporta o Cód. Barra)
+                    df_export_fl = df_export.drop(columns=['fornecedor'], errors='ignore').rename(columns={'Produto': 'Descrição'})
+                    excel_forn_bytes = gerar_excel_download(df_export_fl, "Fornecedores")
+                else:
+                    excel_forn_bytes = gerar_excel_fornecedores(df_export, f"Fornecedores", sem_total=texto_setor, com_obs=setor_eh_materia_prima(setor), setor=setor)
+                st.download_button("📊 Exportar Fornecedores", data=excel_forn_bytes, file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
             with c_print: 
                 injetar_botao_impressao()
 
@@ -2307,8 +2369,14 @@ def iniciar_tela(setor: str):
 
         usa_iceasa = setor_usa_iceasa(setor)
         usa_erp = setor_usa_erp(setor)
+        eh_flores = setor_eh_flores(setor)
         if usa_iceasa and 'codigo_iceasa' not in df_cat_completo.columns:
             df_cat_completo['codigo_iceasa'] = None
+        if eh_flores:
+            for c_extra in ("codigo_barra", "link_foto"):
+                if c_extra not in df_cat_completo.columns:
+                    df_cat_completo[c_extra] = ""
+                df_cat_completo[c_extra] = df_cat_completo[c_extra].fillna("").astype(str).replace({"nan": "", "None": ""})
 
         if not df_cat_completo.empty: 
             df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao']).reset_index(drop=True)
@@ -2323,6 +2391,9 @@ def iniciar_tela(setor: str):
             col_cfg_c["codigo_erp"] = st.column_config.NumberColumn("Cód. ERP", format="%d", width=80)
         if usa_iceasa:
             col_cfg_c["codigo_iceasa"] = st.column_config.NumberColumn("Cód. Iceasa", format="%d", width=90)
+        if eh_flores:
+            col_cfg_c["codigo_barra"] = st.column_config.TextColumn("Cód. Barra", width=125)
+            col_cfg_c["link_foto"] = st.column_config.LinkColumn("Link Foto", width=160, help="URL da foto do produto (aparece como 📷 Ver na tela da loja).")
         for l in LOJAS_NOMES: 
             col_cfg_c[l] = st.column_config.CheckboxColumn(l)
 
@@ -2331,7 +2402,8 @@ def iniciar_tela(setor: str):
             cols_base.append("codigo_erp")
         if usa_iceasa:
             cols_base.append("codigo_iceasa")
-        cols_exibicao = cols_base + ["descricao", "nome_personalizado"] + LOJAS_NOMES
+        cols_flores = ["codigo_barra", "link_foto"] if eh_flores else []
+        cols_exibicao = cols_base + cols_flores + ["descricao", "nome_personalizado"] + LOJAS_NOMES
         edited_cat = st.data_editor(df_cat_completo[cols_exibicao], use_container_width=True, hide_index=True, column_config=col_cfg_c, num_rows="dynamic", key="catalogo_editor")
 
         html_table = df_cat_completo[cols_exibicao].drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
@@ -2392,6 +2464,10 @@ def iniciar_tela(setor: str):
                                     prod_changes["codigo_iceasa"] = int(val_ice) if pd.notna(val_ice) and str(val_ice).strip() != "" else None
                                 except (ValueError, TypeError):
                                     prod_changes["codigo_iceasa"] = None
+                            for c_extra in ("codigo_barra", "link_foto"):
+                                if c_extra in changes:
+                                    v_extra = changes[c_extra]
+                                    prod_changes[c_extra] = str(v_extra).strip() if pd.notna(v_extra) and str(v_extra).strip() != "" else None
                             if prod_changes: 
                                 supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
@@ -2438,12 +2514,17 @@ def iniciar_tela(setor: str):
                             cod_final = (max(codigos_globais) + 1) if codigos_globais else 1
 
                         mapa_novos_idx[idx] = cod_final
-                        supabase.table("produtos").insert({
+                        novo_prod = {
                             "codigo": cod_final, "codigo_erp": cod_erp_digitado,
                             "codigo_iceasa": ice_add,
                             "descricao": desc_add, "fornecedor": forn_add, 
                             "nome_personalizado": np_add, "setor": setor, "ativo": True
-                        }).execute()
+                        }
+                        if eh_flores:
+                            for c_extra in ("codigo_barra", "link_foto"):
+                                v_extra = row.get(c_extra)
+                                novo_prod[c_extra] = str(v_extra).strip() if pd.notna(v_extra) and str(v_extra).strip() != "" else None
+                        supabase.table("produtos").insert(novo_prod).execute()
                         codigos_globais.append(cod_final); codigos_conhecidos.add(cod_final)
 
                     lista_perms_geral = []
