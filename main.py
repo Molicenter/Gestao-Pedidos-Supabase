@@ -441,7 +441,7 @@ def renderizar_dashboard():
     with c1: criar_card("Embalagens", "Sexta-feira até as 17:30hrs", "Embalagens.jpg", "🥡", "embalagem")
     with c2: criar_card("Padaria e Confeitaria", "Sábado", IMG_PADARIA, "🥖", "padaria_confeitaria")
     with c3: criar_card("Matéria Prima", "Até Sábado", "materiaprima.jpg", "🌾", "materia_prima")
-    with c4: criar_card("Flores", "Horário a definir", IMG_FLORES, "🌸", "flores")
+    with c4: criar_card("Flores", "Segunda-feira de 15 em 15 dias até as 17:30hrs", IMG_FLORES, "🌸", "flores")
 
     # ─────────────────────────────────────────────
     # RODAPÉ
