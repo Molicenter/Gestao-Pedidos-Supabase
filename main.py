@@ -25,6 +25,7 @@ IMG_FLV      = "https://images.unsplash.com/photo-1610348725531-843dff563e2c?w=4
 IMG_ORIENTAL = "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?w=400"
 IMG_ACOUGUE  = "https://images.unsplash.com/photo-1544025162-d76694265947?w=400"
 IMG_PADARIA  = "https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400"
+IMG_FLORES   = "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400"
 
 @st.cache_data
 def imagem_para_b64(caminho):
@@ -436,10 +437,11 @@ def renderizar_dashboard():
 
     # --- LINHA 3 ---
     st.markdown('<div class="linha-titulo-sec sec-ambar">📦 Outros Setores e Logística</div>', unsafe_allow_html=True)
-    c1, c2, c3, _ = st.columns(4, gap="medium")
+    c1, c2, c3, c4 = st.columns(4, gap="medium")
     with c1: criar_card("Embalagens", "Sexta-feira até as 17:30hrs", "Embalagens.jpg", "🥡", "embalagem")
     with c2: criar_card("Padaria e Confeitaria", "Sábado", IMG_PADARIA, "🥖", "padaria_confeitaria")
     with c3: criar_card("Matéria Prima", "Até Sábado", "materiaprima.jpg", "🌾", "materia_prima")
+    with c4: criar_card("Flores", "Horário a definir", IMG_FLORES, "🌸", "flores")
 
     # ─────────────────────────────────────────────
     # RODAPÉ
@@ -480,7 +482,8 @@ else:
         'acougue_pecas': "Peças Açougue - Manoel",
         'embalagem': "Embalagens",
         'padaria_confeitaria': "Padaria e Confeitaria",
-        'materia_prima': "Matéria Prima"
+        'materia_prima': "Matéria Prima",
+        'flores': "Flores"
     }
 
     modulo_atual = st.session_state['modulo_ativo']
