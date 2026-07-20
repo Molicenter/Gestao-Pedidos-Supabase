@@ -70,7 +70,7 @@ def carregar_ordem_fornecedores(setor: str) -> dict:
     # {nome_fornecedor: ordem} para o setor. Cache curto (5 min); é limpo ao salvar.
     try:
         supabase = obter_supabase()
-        resp = supabase.table("ordem_fornecedores").select("fornecedor, ordem").eq("setor", setor).execute()
+        resp = supabase.table("pedidos_ordem_fornecedores").select("fornecedor, ordem").eq("setor", setor).execute()
         return {r["fornecedor"]: r["ordem"] for r in (resp.data or [])}
     except Exception:
         # Se a tabela ainda não existir ou der erro, cai no comportamento antigo (alfabético).
@@ -768,7 +768,7 @@ def buscar_permissoes_setor(_supabase_client, codigos_setor, num_loja=None):
     dfs = []
     for i in range(0, len(codigos_setor), 200):
         lote = codigos_setor[i:i+200]
-        query = _supabase_client.table("produtos_lojas").select("codigo_produto, loja, disponivel").in_("codigo_produto", lote)
+        query = _supabase_client.table("pedidos_produtos_lojas").select("codigo_produto, loja, disponivel").in_("codigo_produto", lote)
         if num_loja is not None: 
             query = query.eq("loja", num_loja)
         resp = query.execute()
@@ -783,7 +783,7 @@ def carregar_produtos(setor: str, somente_ativos: bool = False) -> pd.DataFrame:
     campos = "codigo, codigo_erp, codigo_iceasa, descricao, fornecedor, nome_personalizado"
     if setor_eh_flores(setor):
         campos += ", codigo_barra, link_foto"   # colunas extras exclusivas do setor Flores
-    q = supabase.table("produtos").select(campos).eq("setor", setor)
+    q = supabase.table("pedidos_produtos").select(campos).eq("setor", setor)
     if somente_ativos:
         q = q.eq("ativo", True)
     resp = q.execute()
@@ -793,7 +793,7 @@ def carregar_produtos(setor: str, somente_ativos: bool = False) -> pd.DataFrame:
 def carregar_medias(num_loja: int) -> pd.DataFrame:
     # Médias 90d da loja. Só mudam quando o admin puxa do ERP (que limpa o cache).
     supabase = obter_supabase()
-    resp = supabase.table("medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
+    resp = supabase.table("pedidos_medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
     return pd.DataFrame(resp.data)
 
 def sincronizar_medias_setor(setor: str, view_sql: str) -> tuple:
@@ -801,7 +801,7 @@ def sincronizar_medias_setor(setor: str, view_sql: str) -> tuple:
     # Reutilizada pelo botão "Puxar Médias do ERP" e pela atualização automática ao abrir a loja.
     # Retorna (sucesso: bool, qtd: int, msg: str).
     supabase = obter_supabase()
-    resp_prod = supabase.table("produtos").select("codigo, codigo_erp").eq("setor", setor).execute()
+    resp_prod = supabase.table("pedidos_produtos").select("codigo, codigo_erp").eq("setor", setor).execute()
     df_prod_map = pd.DataFrame(resp_prod.data)
     if df_prod_map.empty:
         return (False, 0, "Nenhum produto cadastrado neste setor.")
@@ -820,7 +820,7 @@ def sincronizar_medias_setor(setor: str, view_sql: str) -> tuple:
     df_merged = pd.merge(df_erp_setor, df_prod_map, left_on=c_cod_erp, right_on='codigo_erp', how='inner')
     codigos_pks = df_merged['codigo_pk_interna'].unique().tolist()
     for i in range(0, len(codigos_pks), 200):
-        supabase.table("medias_90d").delete().in_("codigo_produto", codigos_pks[i:i+200]).execute()
+        supabase.table("pedidos_medias_90d").delete().in_("codigo_produto", codigos_pks[i:i+200]).execute()
     lista_insert = []
     for _, row in df_merged.iterrows():
         lista_insert.append({
@@ -829,7 +829,7 @@ def sincronizar_medias_setor(setor: str, view_sql: str) -> tuple:
             "media_dia": float(row[c_med]) if pd.notna(row[c_med]) else 0.0
         })
     for i in range(0, len(lista_insert), 1000):
-        supabase.table("medias_90d").insert(lista_insert[i:i+1000]).execute()
+        supabase.table("pedidos_medias_90d").insert(lista_insert[i:i+1000]).execute()
     return (True, len(lista_insert), "ok")
 
 def carregar_extras(setor: str) -> pd.DataFrame:
@@ -838,7 +838,7 @@ def carregar_extras(setor: str) -> pd.DataFrame:
     # 📌 Persistente: traz TODOS os registros do setor e mantém o MAIS RECENTE
     # por produto (ficam visíveis até o "Limpar Pedidos", como os pedidos).
     supabase = obter_supabase()
-    resp = supabase.table("separacao_extras").select("codigo_produto, preco, observacao, data_pedido").eq("setor", setor).execute()
+    resp = supabase.table("pedidos_separacao_extras").select("codigo_produto, preco, observacao, data_pedido").eq("setor", setor).execute()
     df = pd.DataFrame(resp.data)
     if df.empty:
         return df
@@ -849,7 +849,7 @@ def carregar_obs_loja(setor: str, num_loja: int) -> str:
     # Observação Geral que a própria loja digita (embalagem/padaria/confeitaria). SEM cache.
     # 📌 Persistente: vale a mais recente, independente do dia em que foi escrita.
     supabase = obter_supabase()
-    resp = supabase.table("observacoes_lojas").select("observacao, data_pedido").eq("setor", setor).eq("loja", num_loja).order("data_pedido", desc=True).limit(1).execute()
+    resp = supabase.table("pedidos_observacoes_lojas").select("observacao, data_pedido").eq("setor", setor).eq("loja", num_loja).order("data_pedido", desc=True).limit(1).execute()
     if resp.data:
         return (resp.data[0].get("observacao") or "")
     return ""
@@ -858,7 +858,7 @@ def carregar_obs_lojas_admin(setor: str) -> pd.DataFrame:
     # Todas as observações das lojas, p/ o admin ver na Separação. SEM cache.
     # 📌 Persistente: mantém a mais recente de cada loja.
     supabase = obter_supabase()
-    resp = supabase.table("observacoes_lojas").select("loja, observacao, data_pedido").eq("setor", setor).execute()
+    resp = supabase.table("pedidos_observacoes_lojas").select("loja, observacao, data_pedido").eq("setor", setor).execute()
     df = pd.DataFrame(resp.data)
     if df.empty:
         return df
@@ -868,10 +868,10 @@ def carregar_obs_lojas_admin(setor: str) -> pd.DataFrame:
 def salvar_obs_loja(setor: str, num_loja: int, texto: str, usuario: str):
     # Regrava a observação da loja (apaga TODAS as anteriores e insere se houver texto).
     supabase = obter_supabase()
-    supabase.table("observacoes_lojas").delete().eq("setor", setor).eq("loja", num_loja).execute()
+    supabase.table("pedidos_observacoes_lojas").delete().eq("setor", setor).eq("loja", num_loja).execute()
     txt = (texto or "").strip()
     if txt:
-        supabase.table("observacoes_lojas").insert({
+        supabase.table("pedidos_observacoes_lojas").insert({
             "data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja,
             "observacao": txt, "usuario": usuario
         }).execute()
@@ -884,7 +884,7 @@ def carregar_sem_pedido(setor: str, data_str: str) -> set:
     # Defensivo: se a tabela ainda não existir, retorna vazio (não quebra a tela).
     try:
         supabase = obter_supabase()
-        resp = supabase.table("sem_pedido_hoje").select("loja").eq("setor", setor).eq("data_pedido", data_str).execute()
+        resp = supabase.table("pedidos_sem_pedido_hoje").select("loja").eq("setor", setor).eq("data_pedido", data_str).execute()
         return {int(r["loja"]) for r in resp.data} if resp.data else set()
     except Exception:
         return set()
@@ -893,8 +893,8 @@ def registrar_sem_pedido(setor: str, num_loja: int, data_str: str, usuario: str)
     # Grava (regravando) a declaração de "sem pedido" da loja no dia.
     supabase = obter_supabase()
     try:
-        supabase.table("sem_pedido_hoje").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", data_str).execute()
-        supabase.table("sem_pedido_hoje").insert({
+        supabase.table("pedidos_sem_pedido_hoje").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", data_str).execute()
+        supabase.table("pedidos_sem_pedido_hoje").insert({
             "data_pedido": data_str, "setor": setor, "loja": num_loja, "usuario": usuario
         }).execute()
     except Exception as e:
@@ -904,7 +904,7 @@ def remover_sem_pedido(setor: str, num_loja: int, data_str: str):
     # Remove a marca de "sem pedido" (ex.: a loja mudou de ideia e lançou itens).
     try:
         supabase = obter_supabase()
-        supabase.table("sem_pedido_hoje").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", data_str).execute()
+        supabase.table("pedidos_sem_pedido_hoje").delete().eq("setor", setor).eq("loja", num_loja).eq("data_pedido", data_str).execute()
     except Exception:
         pass
 
@@ -945,14 +945,14 @@ def modal_limpar_pedidos(setor: str):
         if st.button("✔️ Sim, limpar tudo", type="primary", use_container_width=True, key=f"mlp_sim_{setor}"):
             supabase = obter_supabase()
             with st.spinner("Limpando..."):
-                supabase.table("pedidos").delete().eq("setor", setor).execute()
+                supabase.table("pedidos_lancamentos").delete().eq("setor", setor).execute()
                 # Matéria Prima: preserva as observações por produto (separacao_extras) ao limpar.
                 # Nos demais setores, preço/observação são do ciclo e são apagados normalmente.
                 if not setor_eh_materia_prima(setor):
-                    supabase.table("separacao_extras").delete().eq("setor", setor).execute()
-                supabase.table("observacoes_lojas").delete().eq("setor", setor).execute()
+                    supabase.table("pedidos_separacao_extras").delete().eq("setor", setor).execute()
+                supabase.table("pedidos_observacoes_lojas").delete().eq("setor", setor).execute()
                 try:
-                    supabase.table("sem_pedido_hoje").delete().eq("setor", setor).execute()
+                    supabase.table("pedidos_sem_pedido_hoje").delete().eq("setor", setor).execute()
                 except Exception:
                     pass
             # reseta o editor p/ não ficar 'None' preso em células que foram apagadas
@@ -973,7 +973,7 @@ def modal_sem_pedido(setor: str, num_loja: int, loja_selecionada: str):
         if st.button("✔️ Sim, sem pedido hoje", type="primary", use_container_width=True, key=f"msp_sim_{setor}_{num_loja}"):
             supabase = obter_supabase()
             with st.spinner("Registrando 'Sem Pedido Hoje'..."):
-                supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).execute()
+                supabase.table("pedidos_lancamentos").delete().eq("setor", setor).eq("loja", num_loja).execute()
                 # registra a declaração p/ a loja ficar VERDE ("Sem Pedido") na Separação
                 registrar_sem_pedido(setor, num_loja, str(data_brasilia()), st.session_state.get('usuario_logado', loja_selecionada))
                 msg_aviso = (
@@ -1028,7 +1028,7 @@ def modal_ordenar_fornecedores(setor: str, fornecedores_lista: list):
                  "ordem": int(r["Ordem"]) if pd.notna(r["Ordem"]) else 999}
                 for _, r in _edit_ordem.iterrows()
             ]
-            supabase.table("ordem_fornecedores").upsert(
+            supabase.table("pedidos_ordem_fornecedores").upsert(
                 _registros, on_conflict="setor,fornecedor"
             ).execute()
             st.cache_data.clear()
@@ -1378,7 +1378,7 @@ def iniciar_tela(setor: str):
         df_prod = carregar_produtos(setor).copy()
         texto_setor = setor_pedido_texto(setor)   # Embalagens/Matéria Prima/Padaria: pedem em texto
         # 📌 Persistente: SEM filtro de data — mostra tudo que está pendente
-        resp_ped = supabase.table("pedidos").select("id, codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).execute()
+        resp_ped = supabase.table("pedidos_lancamentos").select("id, codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).execute()
         
         df_ped = dedup_pedidos(pd.DataFrame(resp_ped.data))
         
@@ -1594,7 +1594,7 @@ def iniciar_tela(setor: str):
                     for loja_nome in LOJAS_NOMES:
                         n_loja = int(loja_nome.split()[-1])
                         # 📌 Persistente: apaga o pendente da loja p/ estes produtos (qualquer data)
-                        supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).in_("codigo_produto", cods).execute()
+                        supabase.table("pedidos_lancamentos").delete().eq("setor", setor).eq("loja", n_loja).in_("codigo_produto", cods).execute()
                         
                         lista_ins = []
                         for _, r in df_editado.iterrows():
@@ -1608,12 +1608,12 @@ def iniciar_tela(setor: str):
                                     lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                         
                         if lista_ins: 
-                            supabase.table("pedidos").insert(lista_ins).execute()
+                            supabase.table("pedidos_lancamentos").insert(lista_ins).execute()
 
                     # 💲 Preço/Observação: FLV grava Preço+Obs; Matéria Prima grava só Obs.
                     if usa_iceasa or eh_mp:
                         for i in range(0, len(cods), 200):
-                            supabase.table("separacao_extras").delete().eq("setor", setor).in_("codigo_produto", cods[i:i+200]).execute()
+                            supabase.table("pedidos_separacao_extras").delete().eq("setor", setor).in_("codigo_produto", cods[i:i+200]).execute()
                         lista_extras = []
                         for _, r in df_editado.iterrows():
                             preco_val = celula_para_preco(r.get("R$ Preço")) if usa_iceasa else None
@@ -1622,7 +1622,7 @@ def iniciar_tela(setor: str):
                             if preco_val is not None or obs_val is not None:
                                 lista_extras.append({"codigo_produto": int(r["codigo"]), "data_pedido": str(data_brasilia()), "setor": setor, "preco": preco_val, "observacao": obs_val})
                         for i in range(0, len(lista_extras), 1000):
-                            supabase.table("separacao_extras").insert(lista_extras[i:i+1000]).execute()
+                            supabase.table("pedidos_separacao_extras").insert(lista_extras[i:i+1000]).execute()
             st.success("Alterações consolidadas!")
             # limpa o estado do editor para o guarda de "não salvo" desligar
             st.session_state.pop("editor_separacao", None)
@@ -1703,7 +1703,7 @@ def iniciar_tela(setor: str):
         df_med = carregar_medias(num_loja).copy()
         # 📌 Persistente: SEM filtro de data — o pedido pendente da loja aparece
         # até ser salvo por cima, zerado ("Sem Pedido") ou limpo pelo admin.
-        resp_exis = supabase.table("pedidos").select("id, codigo_produto, quantidade, quantidade_texto").eq("setor", setor).eq("loja", num_loja).execute()
+        resp_exis = supabase.table("pedidos_lancamentos").select("id, codigo_produto, quantidade, quantidade_texto").eq("setor", setor).eq("loja", num_loja).execute()
 
         df_exis = dedup_pedidos(pd.DataFrame(resp_exis.data))
         if df_exis is not None and not df_exis.empty:
@@ -1921,7 +1921,7 @@ def iniciar_tela(setor: str):
                 cods_tela = grid_editado["codigo"].tolist()
                 if cods_tela:
                     # 📌 Persistente: apaga o pendente destes produtos (qualquer data) antes de regravar
-                    supabase.table("pedidos").delete().eq("setor", setor).eq("loja", num_loja).in_("codigo_produto", cods_tela).execute()
+                    supabase.table("pedidos_lancamentos").delete().eq("setor", setor).eq("loja", num_loja).in_("codigo_produto", cods_tela).execute()
                     
                     lista_ins = []
                     for _, r in grid_editado.iterrows():
@@ -1935,7 +1935,7 @@ def iniciar_tela(setor: str):
                                 lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                     
                     if lista_ins: 
-                        supabase.table("pedidos").insert(lista_ins).execute()
+                        supabase.table("pedidos_lancamentos").insert(lista_ins).execute()
                         # se a loja tinha declarado "sem pedido" e agora lançou itens, tira a marca
                         if usa_sem_pedido:
                             remover_sem_pedido(setor, num_loja, str(data_brasilia()))
@@ -1961,7 +1961,7 @@ def iniciar_tela(setor: str):
         df_prod = carregar_produtos(setor).copy()
         texto_setor = setor_pedido_texto(setor)   # Embalagens/Matéria Prima/Padaria: pedem em texto
         # 📌 Persistente: SEM filtro de data — mostra tudo que está pendente
-        resp_ped = supabase.table("pedidos").select("id, codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).execute()
+        resp_ped = supabase.table("pedidos_lancamentos").select("id, codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).execute()
         
         df_ped = dedup_pedidos(pd.DataFrame(resp_ped.data))
 
@@ -2132,7 +2132,7 @@ def iniciar_tela(setor: str):
                         for loja_nome in LOJAS_NOMES:
                             n_loja = int(loja_nome.split()[-1])
                             # 📌 Persistente: apaga o pendente da loja p/ estes produtos (qualquer data)
-                            supabase.table("pedidos").delete().eq("setor", setor).eq("loja", n_loja).in_("codigo_produto", cods).execute()
+                            supabase.table("pedidos_lancamentos").delete().eq("setor", setor).eq("loja", n_loja).in_("codigo_produto", cods).execute()
                             
                             lista_ins = []
                             for _, r in df_forn_editado_full.iterrows():
@@ -2146,12 +2146,12 @@ def iniciar_tela(setor: str):
                                         lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                             
                             if lista_ins: 
-                                supabase.table("pedidos").insert(lista_ins).execute()
+                                supabase.table("pedidos_lancamentos").insert(lista_ins).execute()
 
                         # 📝 Observação por produto (só Matéria Prima) → separacao_extras
                         if eh_mp:
                             for i in range(0, len(cods), 200):
-                                supabase.table("separacao_extras").delete().eq("setor", setor).in_("codigo_produto", cods[i:i+200]).execute()
+                                supabase.table("pedidos_separacao_extras").delete().eq("setor", setor).in_("codigo_produto", cods[i:i+200]).execute()
                             lista_extras = []
                             for _, r in df_forn_editado_full.iterrows():
                                 obs_raw = r.get("Observação")
@@ -2159,7 +2159,7 @@ def iniciar_tela(setor: str):
                                 if obs_val is not None:
                                     lista_extras.append({"codigo_produto": int(r["codigo"]), "data_pedido": str(data_brasilia()), "setor": setor, "preco": None, "observacao": obs_val})
                             for i in range(0, len(lista_extras), 1000):
-                                supabase.table("separacao_extras").insert(lista_extras[i:i+1000]).execute()
+                                supabase.table("pedidos_separacao_extras").insert(lista_extras[i:i+1000]).execute()
                 st.success("Alterações consolidadas!")
                 st.rerun()
 
@@ -2183,7 +2183,7 @@ def iniciar_tela(setor: str):
 
         # Pedidos pendentes → quantidade por loja e total por produto
         # 📌 Persistente: SEM filtro de data — usa o que estiver lançado
-        resp_ped = supabase.table("pedidos").select("id, codigo_produto, loja, quantidade").eq("setor", setor).execute()
+        resp_ped = supabase.table("pedidos_lancamentos").select("id, codigo_produto, loja, quantidade").eq("setor", setor).execute()
         df_ped = dedup_pedidos(pd.DataFrame(resp_ped.data))
         qtd_por_loja, total_por_cod = {}, {}
         if not df_ped.empty:
@@ -2332,7 +2332,7 @@ def iniciar_tela(setor: str):
         # tela de edição → sempre dados frescos (evita editar em cima de permissão velha)
         buscar_permissoes_setor.clear()
 
-        resp_prod = supabase.table("produtos").select("*").eq("setor", setor).execute()
+        resp_prod = supabase.table("pedidos_produtos").select("*").eq("setor", setor).execute()
         df_prod = pd.DataFrame(resp_prod.data)
 
         if df_prod.empty: 
@@ -2427,7 +2427,7 @@ def iniciar_tela(setor: str):
             state = st.session_state.get("catalogo_editor")
             with st.spinner("Automação Duplo-Código processando..."):
                 try:
-                    resp_all = supabase.table("produtos").select("codigo").execute()
+                    resp_all = supabase.table("pedidos_produtos").select("codigo").execute()
                     codigos_globais = [p["codigo"] for p in resp_all.data] if resp_all.data else []
                     codigos_conhecidos = set(df_cat_completo['codigo'].dropna().astype(int).tolist()) if not df_cat_completo.empty else set()
                     
@@ -2436,10 +2436,10 @@ def iniciar_tela(setor: str):
                     if state and state.get("deleted_rows"):
                         for idx in state["deleted_rows"]:
                             cod_p = int(df_cat_completo.iloc[idx]["codigo"])
-                            supabase.table("produtos_lojas").delete().eq("codigo_produto", cod_p).execute()
-                            supabase.table("pedidos").delete().eq("codigo_produto", cod_p).execute()
-                            supabase.table("medias_90d").delete().eq("codigo_produto", cod_p).execute()
-                            supabase.table("produtos").delete().eq("codigo", cod_p).execute()
+                            supabase.table("pedidos_produtos_lojas").delete().eq("codigo_produto", cod_p).execute()
+                            supabase.table("pedidos_lancamentos").delete().eq("codigo_produto", cod_p).execute()
+                            supabase.table("pedidos_medias_90d").delete().eq("codigo_produto", cod_p).execute()
+                            supabase.table("pedidos_produtos").delete().eq("codigo", cod_p).execute()
                             if cod_p in codigos_globais: codigos_globais.remove(cod_p)
                             if cod_p in codigos_conhecidos: codigos_conhecidos.remove(cod_p)
 
@@ -2469,7 +2469,7 @@ def iniciar_tela(setor: str):
                                     v_extra = changes[c_extra]
                                     prod_changes[c_extra] = str(v_extra).strip() if pd.notna(v_extra) and str(v_extra).strip() != "" else None
                             if prod_changes: 
-                                supabase.table("produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
+                                supabase.table("pedidos_produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
 
                     for idx, row in edited_cat.iterrows():
                         c_pk = row.get("codigo")
@@ -2524,7 +2524,7 @@ def iniciar_tela(setor: str):
                             for c_extra in ("codigo_barra", "link_foto"):
                                 v_extra = row.get(c_extra)
                                 novo_prod[c_extra] = str(v_extra).strip() if pd.notna(v_extra) and str(v_extra).strip() != "" else None
-                        supabase.table("produtos").insert(novo_prod).execute()
+                        supabase.table("pedidos_produtos").insert(novo_prod).execute()
                         codigos_globais.append(cod_final); codigos_conhecidos.add(cod_final)
 
                     lista_perms_geral = []
@@ -2545,8 +2545,8 @@ def iniciar_tela(setor: str):
 
                     codigos_lista = list(codigos_processados_perms)
                     if codigos_lista:
-                        for i in range(0, len(codigos_lista), 200): supabase.table("produtos_lojas").delete().in_("codigo_produto", codigos_lista[i:i+200]).execute()
-                        for i in range(0, len(lista_perms_geral), 1000): supabase.table("produtos_lojas").insert(lista_perms_geral[i:i+1000]).execute()
+                        for i in range(0, len(codigos_lista), 200): supabase.table("pedidos_produtos_lojas").delete().in_("codigo_produto", codigos_lista[i:i+200]).execute()
+                        for i in range(0, len(lista_perms_geral), 1000): supabase.table("pedidos_produtos_lojas").insert(lista_perms_geral[i:i+1000]).execute()
 
                     st.success("✅ Automação concluída!"); st.cache_data.clear(); time.sleep(1.5); st.rerun()
                 except Exception as e: st.error(f"⚠️ Erro processando: {e}")
@@ -2565,7 +2565,7 @@ def iniciar_tela(setor: str):
                             for _, row in df_nomes.iterrows():
                                 cod_oficial = int(row["cod"])
                                 desc_erp = str(row["descricao"])
-                                supabase.table("produtos").update({"descricao": desc_erp}).eq("codigo_erp", cod_oficial).execute()
+                                supabase.table("pedidos_produtos").update({"descricao": desc_erp}).eq("codigo_erp", cod_oficial).execute()
                             st.success("✅ Nomes atualizados em todos os fornecedores!"); st.cache_data.clear(); time.sleep(1); st.rerun()
                         else: st.info("Nenhum nome encontrado.")
                 except Exception as e:
