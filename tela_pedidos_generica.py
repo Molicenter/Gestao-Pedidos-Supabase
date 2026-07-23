@@ -159,6 +159,24 @@ def setor_eh_flores(setor) -> bool:
     # mas exibe Cód. Barra no lugar do Fornecedor e tem link de foto do produto.
     return "flores" in _normaliza_setor(setor)
 
+def setor_usa_foto(setor) -> bool:
+    # Setores que exibem a coluna Foto (miniatura da imagem) na Visão das Lojas e
+    # permitem editar o "Link Foto" no Catálogo: Flores e FLV Oriental.
+    # Para habilitar outro setor, basta acrescentar a palavra-chave abaixo.
+    s = _normaliza_setor(setor)
+    return setor_eh_flores(setor) or ("oriental" in s)
+
+def foto_como_miniatura(setor) -> bool:
+    # True  -> a coluna Foto vira ImageColumn (miniatura direto na tabela).
+    #          Exige link de IMAGEM DIRETA. No Google Drive é o formato
+    #          https://drive.google.com/thumbnail?id=<ID>&sz=w400 (arquivo
+    #          compartilhado como "qualquer pessoa com o link").
+    # False -> a coluna Foto vira LinkColumn ("📷 Ver"), abre em outra aba.
+    # O Flores usa links da CDN antiga (/view do Drive não renderiza), por isso
+    # segue como link clicável. Para migrar o Flores: rode o UPDATE de conversão
+    # do SQL e troque este return por `return setor_usa_foto(setor)`.
+    return "oriental" in _normaliza_setor(setor)
+
 def setor_usa_erp(setor) -> bool:
     # Setores ligados ao ERP (têm Cód. ERP e puxam estoque). Peças Manoel não usa.
     return not setor_eh_pecas_manoel(setor)
@@ -782,7 +800,9 @@ def carregar_produtos(setor: str, somente_ativos: bool = False) -> pd.DataFrame:
     supabase = obter_supabase()
     campos = "codigo, codigo_erp, codigo_iceasa, descricao, fornecedor, nome_personalizado"
     if setor_eh_flores(setor):
-        campos += ", codigo_barra, link_foto"   # colunas extras exclusivas do setor Flores
+        campos += ", codigo_barra"    # coluna extra exclusiva do setor Flores
+    if setor_usa_foto(setor):
+        campos += ", link_foto"       # Flores e FLV Oriental
     q = supabase.table("pedidos_produtos").select(campos).eq("setor", setor)
     if somente_ativos:
         q = q.eq("ativo", True)
@@ -1769,22 +1789,26 @@ def iniciar_tela(setor: str):
             'codigo': df_loja['codigo'],
             'Cód. ERP': df_loja['codigo_erp'],
         }
+        usa_foto = setor_usa_foto(setor)
         if eh_flores:
-            # 🌸 Flores: Cód. Barra no lugar do Fornecedor + coluna Foto com o link da imagem
+            # 🌸 Flores: Cód. Barra no lugar do Fornecedor (fornecedor único)
             dados_grid['Cód. Barra'] = (df_loja['codigo_barra'] if 'codigo_barra' in df_loja.columns else "")
-            dados_grid['Foto'] = (df_loja['link_foto'] if 'link_foto' in df_loja.columns else "")
         else:
             dados_grid['Fornecedor'] = df_loja['fornecedor']
+        if usa_foto:
+            # 📷 Flores e FLV Oriental: coluna Foto (no Oriental entra logo após o Fornecedor)
+            dados_grid['Foto'] = (df_loja['link_foto'] if 'link_foto' in df_loja.columns else "")
         dados_grid['Descrição'] = df_loja['descricao']
         dados_grid['Média (90d)'] = df_loja['media_dia']
         dados_grid['Estoque ERP'] = df_loja['Estoque']
         dados_grid['Qtde Pedida'] = df_loja['qtd_display']
         df_final_grid = pd.DataFrame(dados_grid)
-        if eh_flores:
-            df_final_grid['Cód. Barra'] = df_final_grid['Cód. Barra'].fillna("").astype(str).replace({"nan": "", "None": ""})
-            # links vazios ou "-" (produto sem foto) ficam em branco → sem botão de foto
+        if usa_foto:
+            # links vazios ou "-" (produto sem foto) ficam em branco → célula sem imagem
             df_final_grid['Foto'] = df_final_grid['Foto'].fillna("").astype(str).replace({"nan": "", "None": "", "-": ""}).str.strip()
             df_final_grid.loc[~df_final_grid['Foto'].str.startswith("http"), 'Foto'] = None
+        if eh_flores:
+            df_final_grid['Cód. Barra'] = df_final_grid['Cód. Barra'].fillna("").astype(str).replace({"nan": "", "None": ""})
             df_final_grid = df_final_grid.sort_values(by='Descrição')
         else:
             df_final_grid = df_final_grid.sort_values(by=['Fornecedor', 'Descrição'])
@@ -1835,17 +1859,28 @@ def iniciar_tela(setor: str):
         }
         if eh_flores:
             col_cfg_l["Cód. Barra"] = st.column_config.TextColumn("Cód. Barra", disabled=True, width=118)
-            col_cfg_l["Foto"] = st.column_config.LinkColumn(
-                "Foto", display_text="📷 Ver", disabled=True, width=72,
-                help="Clique para abrir a foto do produto em outra aba."
-            )
+        if usa_foto:
+            if foto_como_miniatura(setor):
+                # 📷 Miniatura renderizada dentro da célula (link de imagem direta)
+                col_cfg_l["Foto"] = st.column_config.ImageColumn(
+                    "Foto", width=90,
+                    help="Miniatura do produto. Clique para ampliar."
+                )
+            else:
+                col_cfg_l["Foto"] = st.column_config.LinkColumn(
+                    "Foto", display_text="📷 Ver", disabled=True, width=72,
+                    help="Clique para abrir a foto do produto em outra aba."
+                )
 
         # use_container_width=False: as colunas respeitam a largura definida e não
         # "esticam" para preencher a tela (igual à Visão Fornecedores). Fica bem mais
         # compacto — importante porque as lojas também acessam pelo celular.
         # A chave inclui o filtro: ao trocar de fornecedor o editor reinicia limpo,
         # evitando que um valor digitado "escorregue" para a linha de outro produto.
-        grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=False, key=f"grid_loja_{num_loja}_{filtro_forn}")
+        # Linha mais alta só quando há miniatura, senão a imagem fica espremida
+        # na altura padrão (~35px) e a loja não consegue enxergar o produto.
+        altura_linha = 90 if (usa_foto and foto_como_miniatura(setor)) else None
+        grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=False, row_height=altura_linha, key=f"grid_loja_{num_loja}_{filtro_forn}")
 
         # ⚠️ ITEM 3 — alerta de pedido muito acima da média (10x). grid_editado já traz
         # os valores digitados (mesmo antes de salvar), então o alerta atualiza na hora.
@@ -2370,13 +2405,14 @@ def iniciar_tela(setor: str):
         usa_iceasa = setor_usa_iceasa(setor)
         usa_erp = setor_usa_erp(setor)
         eh_flores = setor_eh_flores(setor)
+        usa_foto = setor_usa_foto(setor)
+        cols_extra_cat = (["codigo_barra"] if eh_flores else []) + (["link_foto"] if usa_foto else [])
         if usa_iceasa and 'codigo_iceasa' not in df_cat_completo.columns:
             df_cat_completo['codigo_iceasa'] = None
-        if eh_flores:
-            for c_extra in ("codigo_barra", "link_foto"):
-                if c_extra not in df_cat_completo.columns:
-                    df_cat_completo[c_extra] = ""
-                df_cat_completo[c_extra] = df_cat_completo[c_extra].fillna("").astype(str).replace({"nan": "", "None": ""})
+        for c_extra in cols_extra_cat:
+            if c_extra not in df_cat_completo.columns:
+                df_cat_completo[c_extra] = ""
+            df_cat_completo[c_extra] = df_cat_completo[c_extra].fillna("").astype(str).replace({"nan": "", "None": ""})
 
         if not df_cat_completo.empty: 
             df_cat_completo = df_cat_completo.sort_values(by=['fornecedor', 'descricao']).reset_index(drop=True)
@@ -2393,7 +2429,12 @@ def iniciar_tela(setor: str):
             col_cfg_c["codigo_iceasa"] = st.column_config.NumberColumn("Cód. Iceasa", format="%d", width=90)
         if eh_flores:
             col_cfg_c["codigo_barra"] = st.column_config.TextColumn("Cód. Barra", width=125)
-            col_cfg_c["link_foto"] = st.column_config.LinkColumn("Link Foto", width=160, help="URL da foto do produto (aparece como 📷 Ver na tela da loja).")
+        if usa_foto:
+            col_cfg_c["link_foto"] = st.column_config.LinkColumn(
+                "Link Foto", width=160,
+                help="URL da foto. Google Drive: use https://drive.google.com/thumbnail?id=<ID>&sz=w400 "
+                     "(arquivo compartilhado como 'qualquer pessoa com o link')."
+            )
         for l in LOJAS_NOMES: 
             col_cfg_c[l] = st.column_config.CheckboxColumn(l)
 
@@ -2402,8 +2443,7 @@ def iniciar_tela(setor: str):
             cols_base.append("codigo_erp")
         if usa_iceasa:
             cols_base.append("codigo_iceasa")
-        cols_flores = ["codigo_barra", "link_foto"] if eh_flores else []
-        cols_exibicao = cols_base + cols_flores + ["descricao", "nome_personalizado"] + LOJAS_NOMES
+        cols_exibicao = cols_base + cols_extra_cat + ["descricao", "nome_personalizado"] + LOJAS_NOMES
         edited_cat = st.data_editor(df_cat_completo[cols_exibicao], use_container_width=True, hide_index=True, column_config=col_cfg_c, num_rows="dynamic", key="catalogo_editor")
 
         html_table = df_cat_completo[cols_exibicao].drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
@@ -2520,10 +2560,9 @@ def iniciar_tela(setor: str):
                             "descricao": desc_add, "fornecedor": forn_add, 
                             "nome_personalizado": np_add, "setor": setor, "ativo": True
                         }
-                        if eh_flores:
-                            for c_extra in ("codigo_barra", "link_foto"):
-                                v_extra = row.get(c_extra)
-                                novo_prod[c_extra] = str(v_extra).strip() if pd.notna(v_extra) and str(v_extra).strip() != "" else None
+                        for c_extra in cols_extra_cat:
+                            v_extra = row.get(c_extra)
+                            novo_prod[c_extra] = str(v_extra).strip() if pd.notna(v_extra) and str(v_extra).strip() != "" else None
                         supabase.table("pedidos_produtos").insert(novo_prod).execute()
                         codigos_globais.append(cod_final); codigos_conhecidos.add(cod_final)
 
