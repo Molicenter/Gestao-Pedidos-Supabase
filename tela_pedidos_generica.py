@@ -177,6 +177,76 @@ def foto_como_miniatura(setor) -> bool:
     # do SQL e troque este return por `return setor_usa_foto(setor)`.
     return "oriental" in _normaliza_setor(setor)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔗 ESPELHO DE CATÁLOGO (Catálogo-Mestre)
+# Combinado com a equipe: o FLV Normal é a ÚNICA tela onde se mexe no cadastro
+# de produtos do FLV. Tudo que for salvo lá (incluir, editar, excluir e marcar/
+# desmarcar loja) é replicado automaticamente no FLV Ofertas, que tem os mesmos
+# produtos. Assim ninguém precisa lembrar de repetir a alteração nas duas telas.
+#
+# O casamento entre os dois setores é feito pelo **Cód. ERP** — que é o mesmo nos
+# dois — e NÃO pelo `codigo` (PK interna), porque a "Automação Duplo-Código" dá
+# uma PK diferente pro segundo setor (ex.: ERP 7003 → PK 7003 no Normal e 700301
+# no Ofertas). Produto sem Cód. ERP não é espelhado (não há como casar).
+#
+# Para espelhar outro par de setores no futuro, basta acrescentar aqui.
+# ─────────────────────────────────────────────────────────────────────────────
+ESPELHOS_CATALOGO = {
+    "flv normal": "FLV Ofertas",
+}
+
+def setor_espelho_destino(setor):
+    # Se o setor for MESTRE de um espelho, devolve o nome do setor espelhado.
+    # Senão, devolve None.
+    return ESPELHOS_CATALOGO.get(_normaliza_setor(setor))
+
+def setor_eh_espelhado(setor):
+    # Se o setor for o DESTINO de um espelho, devolve o nome do setor mestre.
+    # Usado só para avisar na tela que o cadastro dele é comandado por outro setor.
+    alvo = _normaliza_setor(setor)
+    for mestre_norm, destino in ESPELHOS_CATALOGO.items():
+        if _normaliza_setor(destino) == alvo:
+            return mestre_norm.title().replace("Flv", "FLV")
+    return None
+
+def mapa_espelho_por_erp(supabase, setor_destino: str) -> dict:
+    # {codigo_erp (int): codigo/PK (int)} dos produtos que já existem no setor espelhado.
+    try:
+        resp = supabase.table("pedidos_produtos").select("codigo, codigo_erp").eq("setor", setor_destino).execute()
+    except Exception:
+        return {}
+    mapa = {}
+    for r in (resp.data or []):
+        if r.get("codigo_erp") is not None:
+            try:
+                mapa[int(r["codigo_erp"])] = int(r["codigo"])
+            except (ValueError, TypeError):
+                continue
+    return mapa
+
+def _erp_int(v):
+    # Converte uma célula de Cód. ERP em int; devolve None se vazia/inválida.
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    try:
+        s = str(v).strip()
+        return int(float(s)) if s != "" else None
+    except (ValueError, TypeError):
+        return None
+
+def gerar_pk_livre(cod_erp: int, codigos_globais: list) -> int:
+    # Mesma regra da "Automação Duplo-Código" já usada no Catálogo: tenta usar o
+    # próprio Cód. ERP como PK; se já estiver em uso por outro setor, vai
+    # sufixando 01, 02, 03... até achar um livre.
+    if cod_erp not in codigos_globais:
+        return cod_erp
+    base_str = str(cod_erp)
+    for i in range(1, 100):
+        tent = int(f"{base_str}{i:02d}")
+        if tent not in codigos_globais:
+            return tent
+    return cod_erp
+
 def setor_usa_erp(setor) -> bool:
     # Setores ligados ao ERP (têm Cód. ERP e puxam estoque). Peças Manoel não usa.
     return not setor_eh_pecas_manoel(setor)
@@ -1057,6 +1127,112 @@ def modal_ordenar_fornecedores(setor: str, fornecedores_lista: list):
             st.rerun()
         except Exception as _e:
             st.error(f"Não consegui salvar a ordem: {_e}")
+
+@st.dialog("🔗 Sincronizar Catálogo Espelhado", width="large")
+def modal_sincronizar_espelho(setor_mestre: str, setor_destino: str):
+    """Alinhamento COMPLETO do catálogo mestre → catálogo espelhado.
+    O 'Salvar Matriz' do dia a dia já espelha as mudanças, mas ele só age no que
+    foi mexido naquela hora. Esta tela serve para acertar divergências ANTIGAS
+    (produtos que existem num setor e não no outro, nomes diferentes, marcações
+    de loja desencontradas). Roda em cima do Cód. ERP."""
+    supabase = obter_supabase()
+
+    st.caption(f"Copia o catálogo do **{setor_mestre}** por cima do **{setor_destino}**: nomes, fornecedor, "
+               f"códigos e marcações de loja. O {setor_mestre} não é alterado.")
+
+    excluir_sobras = st.checkbox(
+        f"Excluir do {setor_destino} os produtos que NÃO existem no {setor_mestre}",
+        value=False,
+        help="Cuidado: apaga também os pedidos pendentes e as médias desses produtos no setor espelhado.",
+    )
+    st.write("<br>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("❌ Cancelar", use_container_width=True, key=f"msync_nao_{setor_mestre}"):
+            st.rerun()
+    with c2:
+        if st.button("✔️ Sincronizar agora", type="primary", use_container_width=True, key=f"msync_sim_{setor_mestre}"):
+            with st.spinner("Alinhando os dois catálogos..."):
+                try:
+                    campos = "codigo, codigo_erp, codigo_iceasa, descricao, fornecedor, nome_personalizado, ativo"
+                    df_m = pd.DataFrame(supabase.table("pedidos_produtos").select(campos).eq("setor", setor_mestre).execute().data or [])
+                    if df_m.empty:
+                        st.warning(f"O {setor_mestre} está sem produtos — nada a sincronizar.")
+                        st.stop()
+
+                    mapa_esp = mapa_espelho_por_erp(supabase, setor_destino)
+                    codigos_globais = [p["codigo"] for p in (supabase.table("pedidos_produtos").select("codigo").execute().data or [])]
+
+                    # Permissões do mestre: {codigo_produto: {loja: disponivel}}
+                    cods_mestre = [int(c) for c in df_m["codigo"].dropna().tolist()]
+                    buscar_permissoes_setor.clear()  # nada de permissão em cache aqui
+                    df_perm_m = buscar_permissoes_setor(supabase, cods_mestre)
+                    perms_m = {}
+                    if not df_perm_m.empty:
+                        for _, r in df_perm_m.iterrows():
+                            perms_m.setdefault(int(r["codigo_produto"]), {})[int(r["loja"])] = bool(r["disponivel"])
+
+                    criados = atualizados = removidos = 0
+                    lista_perms = []
+                    cods_destino_tocados = set()
+                    erps_do_mestre = set()
+
+                    for _, r in df_m.iterrows():
+                        erp = _erp_int(r.get("codigo_erp"))
+                        if erp is None:
+                            continue  # sem Cód. ERP não há como casar
+                        erps_do_mestre.add(erp)
+                        dados = {
+                            "codigo_erp": erp,
+                            "codigo_iceasa": r.get("codigo_iceasa"),
+                            "descricao": r.get("descricao"),
+                            "fornecedor": r.get("fornecedor"),
+                            "nome_personalizado": r.get("nome_personalizado"),
+                        }
+                        dados = {k: (None if pd.isna(v) else v) for k, v in dados.items()}
+
+                        cod_esp = mapa_esp.get(erp)
+                        if cod_esp:
+                            supabase.table("pedidos_produtos").update(dados).eq("codigo", cod_esp).execute()
+                            atualizados += 1
+                        else:
+                            cod_esp = gerar_pk_livre(erp, codigos_globais)
+                            novo = dict(dados)
+                            novo.update({"codigo": cod_esp, "setor": setor_destino, "ativo": True})
+                            supabase.table("pedidos_produtos").insert(novo).execute()
+                            codigos_globais.append(cod_esp)
+                            mapa_esp[erp] = cod_esp
+                            criados += 1
+
+                        cods_destino_tocados.add(cod_esp)
+                        marcas = perms_m.get(int(r["codigo"]), {})
+                        for num_loja in range(1, 9):
+                            lista_perms.append({"codigo_produto": cod_esp, "loja": num_loja,
+                                                "disponivel": bool(marcas.get(num_loja, True))})
+
+                    lista_tocados = list(cods_destino_tocados)
+                    for i in range(0, len(lista_tocados), 200):
+                        supabase.table("pedidos_produtos_lojas").delete().in_("codigo_produto", lista_tocados[i:i+200]).execute()
+                    for i in range(0, len(lista_perms), 1000):
+                        supabase.table("pedidos_produtos_lojas").insert(lista_perms[i:i+1000]).execute()
+
+                    if excluir_sobras:
+                        sobras = [pk for erp_d, pk in mapa_esp.items() if erp_d not in erps_do_mestre]
+                        for i in range(0, len(sobras), 200):
+                            lote = sobras[i:i+200]
+                            supabase.table("pedidos_produtos_lojas").delete().in_("codigo_produto", lote).execute()
+                            supabase.table("pedidos_lancamentos").delete().in_("codigo_produto", lote).execute()
+                            supabase.table("pedidos_medias_90d").delete().in_("codigo_produto", lote).execute()
+                            supabase.table("pedidos_produtos").delete().in_("codigo", lote).execute()
+                        removidos = len(sobras)
+
+                    st.cache_data.clear()
+                    st.success(f"✅ {setor_destino} sincronizado — {criados} incluído(s), {atualizados} atualizado(s), {removidos} removido(s).")
+                    time.sleep(2.5)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"⚠️ Erro na sincronização: {e}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🧠 FUNÇÃO DIRETORA DO MÓDULO UNIFICADO
@@ -2364,6 +2540,22 @@ def iniciar_tela(setor: str):
     elif perfil_navegacao == "Catálogo de Produtos":
         st.markdown(f"<div class='no-print'><h2>🗂️ Gestão de Catálogo e Permissões por Loja — {setor}</h2></div>", unsafe_allow_html=True)
 
+        # 🔗 Avisos do espelho de catálogo (ver ESPELHOS_CATALOGO lá em cima)
+        setor_espelho = setor_espelho_destino(setor)
+        setor_mestre = setor_eh_espelhado(setor)
+        if setor_espelho:
+            st.info(
+                f"🔗 **Catálogo-Mestre:** tudo que você salvar aqui é replicado automaticamente no **{setor_espelho}** — "
+                f"inclusões, alterações de nome/fornecedor/código, exclusões e as marcações de loja. "
+                f"Não precisa repetir a alteração lá."
+            )
+        elif setor_mestre:
+            st.warning(
+                f"🔒 O cadastro deste setor é comandado pelo **{setor_mestre}**. "
+                f"Alterações feitas aqui **não sobem** para o {setor_mestre} e podem ser sobrescritas no próximo salvamento de lá. "
+                f"Para mexer no catálogo do FLV, use a tela do {setor_mestre}."
+            )
+
         # tela de edição → sempre dados frescos (evita editar em cima de permissão velha)
         buscar_permissoes_setor.clear()
 
@@ -2450,14 +2642,27 @@ def iniciar_tela(setor: str):
         st.markdown(f'<div class="print-only"><h3>🗂️ Catálogo Geral — {setor}</h3><div class="print-datetime">Emitido em {data_hora_brasilia()}</div>{html_table}</div>', unsafe_allow_html=True)
 
         st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
-        col_btn_salvar, col_btn_erp, col_btn_ordenar = st.columns(3)
-        
+        if setor_espelho:
+            col_btn_salvar, col_btn_erp, col_btn_ordenar, col_btn_espelho = st.columns(4)
+        else:
+            col_btn_salvar, col_btn_erp, col_btn_ordenar = st.columns(3)
+            col_btn_espelho = None
+
         with col_btn_salvar: 
             btn_salvar = st.button("💾 Salvar Matriz do Catálogo", type="primary", use_container_width=True)
         with col_btn_erp: 
             btn_puxar_erp = st.button("📥 Puxar Nomes do ERP", use_container_width=True)
         with col_btn_ordenar:
             btn_ordenar = st.button("⚙️ Ordenar Fornecedores", use_container_width=True)
+        btn_espelho = False
+        if col_btn_espelho is not None:
+            with col_btn_espelho:
+                btn_espelho = st.button(f"🔗 Sincronizar {setor_espelho}", use_container_width=True,
+                                        help="Faz um alinhamento COMPLETO do catálogo deste setor com o setor espelhado. "
+                                             "Use uma vez para acertar divergências antigas; no dia a dia o Salvar já espelha sozinho.")
+
+        if btn_espelho:
+            modal_sincronizar_espelho(setor, setor_espelho)
 
         if btn_ordenar:
             fornecedores_unicos = df_cat_completo["fornecedor"].dropna().unique().tolist()
@@ -2473,15 +2678,30 @@ def iniciar_tela(setor: str):
                     
                     mapa_novos_idx = {}  # índice da linha nova → código (PK) gerado
 
+                    # 🔗 Espelho: mapa {Cód. ERP → PK} do setor destino + contadores p/ o aviso final
+                    mapa_esp = mapa_espelho_por_erp(supabase, setor_espelho) if setor_espelho else {}
+                    esp_excluidos = esp_editados = esp_incluidos = esp_permissoes = 0
+
                     if state and state.get("deleted_rows"):
                         for idx in state["deleted_rows"]:
                             cod_p = int(df_cat_completo.iloc[idx]["codigo"])
+                            erp_p = _erp_int(df_cat_completo.iloc[idx].get("codigo_erp"))
                             supabase.table("pedidos_produtos_lojas").delete().eq("codigo_produto", cod_p).execute()
                             supabase.table("pedidos_lancamentos").delete().eq("codigo_produto", cod_p).execute()
                             supabase.table("pedidos_medias_90d").delete().eq("codigo_produto", cod_p).execute()
                             supabase.table("pedidos_produtos").delete().eq("codigo", cod_p).execute()
                             if cod_p in codigos_globais: codigos_globais.remove(cod_p)
                             if cod_p in codigos_conhecidos: codigos_conhecidos.remove(cod_p)
+
+                            # 🔗 Espelho: apaga o gêmeo no setor destino (mesmo Cód. ERP)
+                            cod_esp = mapa_esp.pop(erp_p, None) if erp_p is not None else None
+                            if cod_esp:
+                                supabase.table("pedidos_produtos_lojas").delete().eq("codigo_produto", cod_esp).execute()
+                                supabase.table("pedidos_lancamentos").delete().eq("codigo_produto", cod_esp).execute()
+                                supabase.table("pedidos_medias_90d").delete().eq("codigo_produto", cod_esp).execute()
+                                supabase.table("pedidos_produtos").delete().eq("codigo", cod_esp).execute()
+                                if cod_esp in codigos_globais: codigos_globais.remove(cod_esp)
+                                esp_excluidos += 1
 
                     if state and state.get("edited_rows"):
                         for idx_str, changes in state["edited_rows"].items():
@@ -2510,6 +2730,25 @@ def iniciar_tela(setor: str):
                                     prod_changes[c_extra] = str(v_extra).strip() if pd.notna(v_extra) and str(v_extra).strip() != "" else None
                             if prod_changes: 
                                 supabase.table("pedidos_produtos").update(prod_changes).eq("codigo", cod_p_original).execute()
+
+                                # 🔗 Espelho: aplica exatamente as mesmas alterações no gêmeo.
+                                # Casa pelo Cód. ERP ANTIGO (o que está no banco), porque o novo
+                                # pode ter acabado de mudar nesta mesma linha.
+                                if setor_espelho:
+                                    erp_antigo = _erp_int(df_cat_completo.iloc[idx].get("codigo_erp"))
+                                    cod_esp = mapa_esp.get(erp_antigo) if erp_antigo is not None else None
+                                    if cod_esp:
+                                        # `codigo` (PK) e `setor` NUNCA são copiados — são a identidade do gêmeo.
+                                        mudancas_esp = {k: v for k, v in prod_changes.items() if k not in ("codigo", "setor")}
+                                        if mudancas_esp:
+                                            supabase.table("pedidos_produtos").update(mudancas_esp).eq("codigo", cod_esp).execute()
+                                            esp_editados += 1
+                                        # Se o Cód. ERP mudou, reindexa o mapa p/ o resto do processamento
+                                        if "codigo_erp" in prod_changes:
+                                            mapa_esp.pop(erp_antigo, None)
+                                            novo_erp = _erp_int(prod_changes["codigo_erp"])
+                                            if novo_erp is not None:
+                                                mapa_esp[novo_erp] = cod_esp
 
                     for idx, row in edited_cat.iterrows():
                         c_pk = row.get("codigo")
@@ -2566,6 +2805,18 @@ def iniciar_tela(setor: str):
                         supabase.table("pedidos_produtos").insert(novo_prod).execute()
                         codigos_globais.append(cod_final); codigos_conhecidos.add(cod_final)
 
+                        # 🔗 Espelho: cria o mesmo produto no setor destino, com PK própria
+                        # (Automação Duplo-Código). Se já existir lá com este ERP, não duplica.
+                        if setor_espelho and cod_erp_digitado is not None and cod_erp_digitado not in mapa_esp:
+                            cod_esp_final = gerar_pk_livre(cod_erp_digitado, codigos_globais)
+                            novo_esp = dict(novo_prod)
+                            novo_esp["codigo"] = cod_esp_final
+                            novo_esp["setor"] = setor_espelho
+                            supabase.table("pedidos_produtos").insert(novo_esp).execute()
+                            codigos_globais.append(cod_esp_final)
+                            mapa_esp[cod_erp_digitado] = cod_esp_final
+                            esp_incluidos += 1
+
                     lista_perms_geral = []
                     codigos_processados_perms = set()
                     
@@ -2587,7 +2838,38 @@ def iniciar_tela(setor: str):
                         for i in range(0, len(codigos_lista), 200): supabase.table("pedidos_produtos_lojas").delete().in_("codigo_produto", codigos_lista[i:i+200]).execute()
                         for i in range(0, len(lista_perms_geral), 1000): supabase.table("pedidos_produtos_lojas").insert(lista_perms_geral[i:i+1000]).execute()
 
-                    st.success("✅ Automação concluída!"); st.cache_data.clear(); time.sleep(1.5); st.rerun()
+                    # 🔗 Espelho: replica as MESMAS marcações de loja nos gêmeos.
+                    # Regravação completa (delete + insert), igual ao setor mestre.
+                    if setor_espelho:
+                        lista_perms_esp = []
+                        codigos_esp_perms = set()
+                        for idx, row in edited_cat.iterrows():
+                            erp_v = _erp_int(row.get("codigo_erp"))
+                            cod_esp = mapa_esp.get(erp_v) if erp_v is not None else None
+                            if not cod_esp:
+                                continue
+                            codigos_esp_perms.add(cod_esp)
+                            for num_loja in range(1, 9):
+                                lista_perms_esp.append({
+                                    "codigo_produto": cod_esp, "loja": num_loja,
+                                    "disponivel": bool(row.get(f"Loja {num_loja:02d}", True))
+                                })
+                        codigos_esp_lista = list(codigos_esp_perms)
+                        if codigos_esp_lista:
+                            for i in range(0, len(codigos_esp_lista), 200):
+                                supabase.table("pedidos_produtos_lojas").delete().in_("codigo_produto", codigos_esp_lista[i:i+200]).execute()
+                            for i in range(0, len(lista_perms_esp), 1000):
+                                supabase.table("pedidos_produtos_lojas").insert(lista_perms_esp[i:i+1000]).execute()
+                        esp_permissoes = len(codigos_esp_lista)
+
+                    st.success("✅ Automação concluída!")
+                    if setor_espelho:
+                        st.info(
+                            f"🔗 Replicado no **{setor_espelho}**: {esp_permissoes} produto(s) com marcações de loja atualizadas"
+                            f" · {esp_incluidos} incluído(s) · {esp_editados} alterado(s) · {esp_excluidos} excluído(s)."
+                        )
+                        time.sleep(1.5)
+                    st.cache_data.clear(); time.sleep(1.5); st.rerun()
                 except Exception as e: st.error(f"⚠️ Erro processando: {e}")
 
         if btn_puxar_erp:
