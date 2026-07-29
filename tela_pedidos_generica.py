@@ -83,7 +83,65 @@ def ordenar_fornecedores(nomes, setor: str) -> list:
     limpos = [n for n in dict.fromkeys(nomes) if n is not None and str(n).strip() != ""]
     return sorted(limpos, key=lambda n: (mapa.get(n, _ORDEM_NAO_DEFINIDA), str(n).lower()))
 
-conn_pg = st.connection("banco_erp", type="sql")
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔌 CHAVE GERAL DO ERP  (modo degradado — usar quando o pessoal estiver mexendo
+# nas conexões externas). Com a chave DESLIGADA o app NÃO consulta o Postgres do
+# ERP: o Estoque sai zerado e as médias ficam sendo as últimas já gravadas no
+# Supabase. A digitação, o salvamento, a Separação e os Excel continuam normais.
+#
+# COMO DESLIGAR SEM MEXER NO CÓDIGO (jeito rápido):
+#   share.streamlit.io > app > ⋮ > Settings > Secrets → acrescentar a linha:
+#       ERP_ATIVO = false
+#   Salvar. O app reinicia sozinho em alguns segundos (avise a turma: quem estiver
+#   com pedido digitado e NÃO salvo perde o que está na tela).
+#   Para religar: trocar para true (ou apagar a linha).
+# ─────────────────────────────────────────────────────────────────────────────
+ERP_ATIVO_PADRAO = True  # valor usado quando não há ERP_ATIVO no secrets
+
+
+def erp_ativo() -> bool:
+    """True = pode consultar o ERP; False = modo degradado (ignora estoque/médias).
+
+    ⚠️ No secrets.toml a linha ERP_ATIVO deve ficar NO TOPO do arquivo, ANTES do
+    primeiro [cabecalho]. Se ela for escrita depois de [connections.banco_erp],
+    o TOML entende que é chave DAQUELA seção (e o Streamlit ainda tenta repassar
+    isso pro create_engine, o que pode quebrar a conexão). Por segurança a função
+    procura nos dois lugares, mas o certo é no topo.
+    """
+    v = None
+    try:
+        v = st.secrets.get("ERP_ATIVO", None)
+    except Exception:
+        v = None
+    if v is None:
+        try:  # tolerância: chave escrita por engano dentro de [connections.banco_erp]
+            v = st.secrets["connections"]["banco_erp"].get("ERP_ATIVO", None)
+        except Exception:
+            v = None
+    if v is None:
+        v = ERP_ATIVO_PADRAO
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() not in ("false", "0", "nao", "não", "off", "no", "n")
+
+
+def aviso_erp_desligado(extra: str = ""):
+    """Faixa avisando que o ERP está fora — para a loja não achar que o app quebrou."""
+    st.info(
+        "🔌 **Conexão com o ERP está temporariamente desligada.** O **Estoque** aparece "
+        "zerado e as **médias** são as últimas já gravadas. Pode digitar e salvar o "
+        "pedido normalmente." + (f" {extra}" if extra else "")
+    )
+
+
+# connect_timeout: se o servidor do ERP não responder, a consulta falha em 5s em vez
+# de ficar pendurada travando a tela. statement_timeout: teto de 10s por consulta.
+# (Se por algum motivo a conexão passar a dar erro, basta remover o connect_args.)
+conn_pg = st.connection(
+    "banco_erp",
+    type="sql",
+    connect_args={"connect_timeout": 5, "options": "-c statement_timeout=10000"},
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🔍 FUNÇÕES AUXILIARES DE CONSULTA E UTILITÁRIOS
@@ -384,6 +442,9 @@ def celula_para_preco(s):
 def buscar_estoque_erp(loja_nome, codigos_erp, setor):
     if not codigos_erp:
         return pd.DataFrame(columns=["Código", "Estoque"])
+    if not erp_ativo():
+        # 🔌 ERP desligado: devolve estoque zerado na hora, sem tentar conectar.
+        return pd.DataFrame({"Código": list(codigos_erp), "Estoque": 0})
     loja_id = int(loja_nome.split()[-1])
     loja_id_str = f"{loja_id:03d}"
     cods_str = ", ".join(map(str, set(codigos_erp)))
@@ -952,6 +1013,8 @@ def sincronizar_medias_setor(setor: str, view_sql: str) -> tuple:
     # Puxa a média do período (view do ERP) e regrava medias_90d p/ os produtos do setor.
     # Reutilizada pelo botão "Puxar Médias do ERP" e pela atualização automática ao abrir a loja.
     # Retorna (sucesso: bool, qtd: int, msg: str).
+    if not erp_ativo():
+        return (False, 0, "🔌 ERP desligado (ERP_ATIVO = false) — médias mantidas como estão.")
     supabase = obter_supabase()
     resp_prod = supabase.table("pedidos_produtos").select("codigo, codigo_erp").eq("setor", setor).execute()
     df_prod_map = pd.DataFrame(resp_prod.data)
@@ -1611,7 +1674,10 @@ def iniciar_tela(setor: str):
             idx_padrao = opcoes_views.index(filtro_padrao) if filtro_padrao in opcoes_views else 0
             view_escolhida = st.selectbox("Selecione o período base:", opcoes_views, index=idx_padrao, label_visibility="collapsed")
             
-            if st.button("📥 Puxar Médias do ERP", type="secondary", use_container_width=True):
+            if not erp_ativo():
+                st.caption("🔌 ERP desligado (ERP_ATIVO = false) — puxar médias está indisponível.")
+            if st.button("📥 Puxar Médias do ERP", type="secondary", use_container_width=True,
+                         disabled=not erp_ativo()):
                 view_sql = VIEWS_MEDIA[view_escolhida]
                 with st.spinner(f"Sincronizando {view_sql}..."):
                     try:
@@ -1931,6 +1997,9 @@ def iniciar_tela(setor: str):
             modal_pedido_salvo(loja_selecionada)
 
         st.markdown(f"<div class='no-print'><h2>📦 Lançamento de Pedidos — {loja_selecionada}</h2></div>", unsafe_allow_html=True)
+
+        if not erp_ativo():
+            aviso_erp_desligado()
         
         df_prod = carregar_produtos(setor, somente_ativos=True).copy()
 
@@ -1948,7 +2017,7 @@ def iniciar_tela(setor: str):
         
         # 🔄 Médias automáticas: ao abrir a loja já traz a média do filtro padrão do setor
         # (1x por sessão por setor+filtro; o admin ainda pode trocar/puxar manualmente na lateral).
-        if acesso_total and usa_media:
+        if acesso_total and usa_media and erp_ativo():
             filtro_pad = filtro_media_padrao(setor)
             flag_med = f"med_auto_{setor}_{filtro_pad}"
             if not st.session_state.get(flag_med):
@@ -2948,7 +3017,9 @@ def iniciar_tela(setor: str):
                     st.cache_data.clear(); time.sleep(1.5); st.rerun()
                 except Exception as e: st.error(f"⚠️ Erro processando: {e}")
 
-        if btn_puxar_erp:
+        if btn_puxar_erp and not erp_ativo():
+            st.warning("🔌 ERP desligado (ERP_ATIVO = false) — não dá para puxar os nomes oficiais agora.")
+        elif btn_puxar_erp:
             with st.spinner("Buscando nomes oficias usando Cód. ERP..."):
                 try:
                     cods_erp = [int(c) for c in edited_cat["codigo_erp"].tolist() if pd.notna(c) and str(c).strip() != ""]
