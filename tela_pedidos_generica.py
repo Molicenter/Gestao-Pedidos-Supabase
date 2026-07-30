@@ -625,7 +625,35 @@ def gerar_excel_download(df: pd.DataFrame, nome_aba: str, com_obs: bool = False,
 
     return output.getvalue()
 
-def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str, sem_total: bool = False, com_obs: bool = False, setor: str = "") -> bytes:
+def _aba_obs_lojas(writer, df_obs: pd.DataFrame):
+    # Aba "Observações das Lojas" no fim da pasta (Embalagens/Padaria/Confeitaria).
+    if df_obs is None or df_obs.empty:
+        return
+    ws = writer.book.create_sheet("Observações das Lojas")
+    fill_h = PatternFill(start_color="C55A11", end_color="C55A11", fill_type="solid")
+    font_h = Font(color="FFFFFF", bold=True)
+    borda = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'),
+                   top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
+    al_c = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    al_l = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    for i, titulo in enumerate(["Loja", "Observação"], start=1):
+        c = ws.cell(row=1, column=i, value=titulo)
+        c.fill, c.font, c.border, c.alignment = fill_h, font_h, borda, al_c
+
+    for n, (_, r) in enumerate(df_obs.iterrows(), start=2):
+        c1 = ws.cell(row=n, column=1, value=str(r["Loja"]))
+        c1.alignment, c1.border = al_c, borda
+        c2 = ws.cell(row=n, column=2, value=str(r["Observação"]))
+        c2.alignment, c2.border = al_l, borda
+
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 110
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToWidth = 1
+
+
+def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str, sem_total: bool = False, com_obs: bool = False, setor: str = "", df_obs_lojas: pd.DataFrame = None) -> bytes:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         worksheet = writer.book.create_sheet(nome_aba[:30])
@@ -753,6 +781,9 @@ def gerar_excel_fornecedores(df: pd.DataFrame, nome_aba: str, sem_total: bool = 
                     c_obs.font = font_normal
                 current_row += 1
                 
+        # 📝 aba extra com os recados das lojas (Embalagens/Padaria/Confeitaria)
+        _aba_obs_lojas(writer, df_obs_lojas)
+
         if 'Sheet' in writer.book.sheetnames: 
             writer.book.remove(writer.book['Sheet'])
 
@@ -1325,6 +1356,43 @@ def carregar_obs_lojas_admin(setor: str) -> pd.DataFrame:
         return df
     df = df.sort_values("data_pedido").drop_duplicates(subset=["loja"], keep="last")
     return df.drop(columns=["data_pedido"], errors="ignore")
+
+def obs_lojas_formatado(setor: str) -> pd.DataFrame:
+    # Observações das lojas prontas para exibir/imprimir/exportar: colunas
+    # "Loja" e "Observação", ordenadas. DataFrame vazio quando não há nada.
+    df = carregar_obs_lojas_admin(setor)
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["Loja", "Observação"])
+    df = df.copy()
+    df["Loja"] = df["loja"].apply(lambda n: f"Loja {int(n):02d}")
+    df = df.rename(columns={"observacao": "Observação"})
+    df["Observação"] = df["Observação"].fillna("").astype(str).str.strip()
+    df = df[df["Observação"] != ""]
+    return df[["Loja", "Observação"]].sort_values("Loja").reset_index(drop=True)
+
+
+def bloco_obs_lojas(setor: str, titulo_tela: str = "📝 Observações das Lojas"):
+    # Desenha o bloco de observações (tela + versão de impressão) e devolve o df,
+    # para quem chamou poder mandar as mesmas linhas para o Excel.
+    df_obs = obs_lojas_formatado(setor)
+    st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='no-print'><h3>{titulo_tela} — {data_hora_brasilia()}</h3></div>",
+                unsafe_allow_html=True)
+    if df_obs.empty:
+        st.info("Nenhuma loja registrou observação.")
+        return df_obs
+    st.dataframe(
+        df_obs, hide_index=True, use_container_width=True,
+        column_config={
+            "Loja": st.column_config.TextColumn(width=90),
+            "Observação": st.column_config.TextColumn(width=700),
+        },
+    )
+    html_obs = df_obs.to_html(index=False, classes="print-table")
+    st.markdown(f'<div class="print-only"><h3>📝 Observações das Lojas</h3>{html_obs}</div>',
+                unsafe_allow_html=True)
+    return df_obs
+
 
 def salvar_obs_loja(setor: str, num_loja: int, texto: str, usuario: str):
     # Regrava a observação da loja (apaga TODAS as anteriores e insere se houver texto).
@@ -2376,24 +2444,7 @@ def iniciar_tela(setor: str):
 
         # 📝 Observações das Lojas (embalagem/padaria/confeitaria): o admin vê o recado de cada loja
         if setor_usa_obs_loja(setor) and acesso_total:
-            df_obs = carregar_obs_lojas_admin(setor)
-            st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='no-print'><h3>📝 Observações das Lojas — {data_hora_brasilia()}</h3></div>", unsafe_allow_html=True)
-            if df_obs is not None and not df_obs.empty:
-                df_obs = df_obs.copy()
-                df_obs["Loja"] = df_obs["loja"].apply(lambda n: f"Loja {int(n):02d}")
-                df_obs = df_obs.rename(columns={"observacao": "Observação"})[["Loja", "Observação"]].sort_values("Loja")
-                st.dataframe(
-                    df_obs, hide_index=True, use_container_width=True,
-                    column_config={
-                        "Loja": st.column_config.TextColumn(width=90),
-                        "Observação": st.column_config.TextColumn(width=700),
-                    },
-                )
-                html_obs = df_obs.to_html(index=False, classes="print-table")
-                st.markdown(f'<div class="print-only"><h3>📝 Observações das Lojas</h3>{html_obs}</div>', unsafe_allow_html=True)
-            else:
-                st.info("Nenhuma loja registrou observação.")
+            bloco_obs_lojas(setor)
 
     # ─────────────────────────────────────────────────────────────────────────
     # ROTA 2 — VISÃO DAS LOJAS
@@ -2903,6 +2954,12 @@ def iniciar_tela(setor: str):
 
         st.markdown("<div class='no-print'><br></div>", unsafe_allow_html=True)
         
+        # 📝 Observações das Lojas também aqui no Resumo (a cliente conferia só na
+        # Separação e não via os recados nesta tela). Vem ANTES dos botões para
+        # que o Excel possa levar as mesmas linhas numa aba extra.
+        _usa_obs_resumo = setor_usa_obs_loja(setor) and acesso_total
+        df_obs_resumo = bloco_obs_lojas(setor) if _usa_obs_resumo else None
+
         if all_edited_frames:
             df_forn_editado_full = pd.concat(all_edited_frames, ignore_index=True)
             c_salvar, c_excel, c_print = st.columns([2, 2, 1])
@@ -2915,7 +2972,7 @@ def iniciar_tela(setor: str):
                     df_export_fl = df_export.drop(columns=['fornecedor'], errors='ignore').rename(columns={'Produto': 'Descrição'})
                     excel_forn_bytes = gerar_excel_download(df_export_fl, "Fornecedores")
                 else:
-                    excel_forn_bytes = gerar_excel_fornecedores(df_export, f"Fornecedores", sem_total=texto_setor, com_obs=setor_eh_materia_prima(setor), setor=setor)
+                    excel_forn_bytes = gerar_excel_fornecedores(df_export, f"Fornecedores", sem_total=texto_setor, com_obs=setor_eh_materia_prima(setor), setor=setor, df_obs_lojas=df_obs_resumo)
                 st.download_button("📊 Exportar Fornecedores", data=excel_forn_bytes, file_name=f"Resumo_Fornecedores_{setor}.xlsx", use_container_width=True)
             with c_print: 
                 injetar_botao_impressao()
