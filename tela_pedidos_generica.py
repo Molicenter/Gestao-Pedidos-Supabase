@@ -1366,23 +1366,36 @@ def autosalvar_qtd(setor: str, num_loja: int, chave_grid: str, df_ref: pd.DataFr
     if not edicoes:
         return
 
+    # ⚠️ O estado de um data_editor é SOMENTE LEITURA. Escrever em
+    # st.session_state[chave_grid] derruba a tela com
+    # StreamlitValueAssignmentNotAllowedError quando o widget é remontado no
+    # rerun seguinte. Por isso o controle do que já foi para o banco vive numa
+    # chave própria: guardamos o último valor persistido de cada linha e só
+    # gravamos o que mudou. Sem esse controle o edited_rows — que acumula TODAS
+    # as edições do widget — faria o item 50 regravar os 49 anteriores a cada
+    # Enter.
+    marca = f"_autosave_ok_{chave_grid}"
+    ja_gravado = dict(st.session_state.get(marca) or {})
+
     supabase = obter_supabase()
     hoje = str(data_brasilia())
-    gravados, erro = [], None
+    erro = None
 
     for pos, campos in edicoes.items():
         if "Qtde Pedida" not in campos:
-            gravados.append(pos)          # edição em outra coluna: nada a gravar
-            continue
+            continue                      # edição em outra coluna: nada a gravar
+
+        bruto = campos.get("Qtde Pedida")
+        if pos in ja_gravado and ja_gravado[pos] == bruto:
+            continue                      # este valor já está no banco
+
         try:
             # 'pos' é a posição da linha no df ENTREGUE ao editor — por isso o
             # df_filtrado leva reset_index antes de ser passado.
             cod = int(df_ref.iloc[int(pos)]["codigo"])
         except Exception:
-            gravados.append(pos)
             continue
 
-        bruto = campos.get("Qtde Pedida")
         try:
             # regrava só este produto: apaga o que houver e insere o valor novo
             supabase.table("pedidos_lancamentos").delete() \
@@ -1405,18 +1418,13 @@ def autosalvar_qtd(setor: str, num_loja: int, chave_grid: str, df_ref: pd.DataFr
                         "codigo_produto": cod, "quantidade": q,
                         "usuario": usuario, "confirmado": False,
                     }).execute()
-            gravados.append(pos)
+            ja_gravado[pos] = bruto       # só marca DEPOIS de gravar
         except Exception as e:
             erro = str(e)
-            break   # não insiste em cascata: o que sobrou fica na tela
+            break   # não insiste em cascata: o que falhou continua na tela e é
+                    # retentado na próxima edição da loja
 
-    # Limpa do delta APENAS o que foi gravado. O que falhou continua no editor,
-    # visível para a loja, e é retentado na próxima edição. Sem esta limpeza o
-    # edited_rows acumula e cada Enter regravaria todas as células anteriores.
-    restantes = {p: c for p, c in edicoes.items() if p not in gravados}
-    novo_estado = dict(estado)
-    novo_estado["edited_rows"] = restantes
-    st.session_state[chave_grid] = novo_estado
+    st.session_state[marca] = ja_gravado
     st.session_state[f"autosave_erro_{setor}_{num_loja}"] = erro
 
 
@@ -1480,7 +1488,11 @@ def modal_sem_pedido(setor: str, num_loja: int, loja_selecionada: str):
                 enviado = notificar_telegram(msg_aviso)
             st.session_state[f"sem_pedido_msg_{setor}_{num_loja}"] = "ok" if enviado else "parcial"
             # limpa o editor (todas as variações de filtro) para a tela voltar zerada
-            for _k in [k for k in list(st.session_state.keys()) if str(k).startswith(f"grid_loja_{num_loja}")]:
+            # inclui o registro do autosave (_autosave_ok_grid_loja_...), senão um
+            # valor idêntico digitado depois seria considerado já gravado
+            for _k in [k for k in list(st.session_state.keys())
+                       if str(k).startswith(f"grid_loja_{num_loja}")
+                       or str(k).startswith(f"_autosave_ok_grid_loja_{num_loja}")]:
                 st.session_state.pop(_k, None)
             st.rerun()
 
@@ -2609,7 +2621,11 @@ def iniciar_tela(setor: str):
                 if usa_obs:
                     salvar_obs_loja(setor, num_loja, obs_loja, usuario_atual)
             # limpa o estado dos editores (todas as variações de filtro) p/ o guarda desligar
-            for _k in [k for k in list(st.session_state.keys()) if str(k).startswith(f"grid_loja_{num_loja}")]:
+            # inclui o registro do autosave (_autosave_ok_grid_loja_...), senão um
+            # valor idêntico digitado depois seria considerado já gravado
+            for _k in [k for k in list(st.session_state.keys())
+                       if str(k).startswith(f"grid_loja_{num_loja}")
+                       or str(k).startswith(f"_autosave_ok_grid_loja_{num_loja}")]:
                 st.session_state.pop(_k, None)
             st.session_state.pop(f"obs_loja_{setor}_{num_loja}", None)
             # ✅ sinaliza sucesso → o modal de confirmação aparece após o rerun
