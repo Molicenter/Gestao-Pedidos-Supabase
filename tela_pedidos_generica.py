@@ -1343,6 +1343,84 @@ def guardar_contra_saida(tem_alteracoes: bool):
         )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 💾 AUTOSAVE DA DIGITAÇÃO DA LOJA
+#
+# Problema que isto resolve: o que a loja digitava vivia só no session_state do
+# servidor até alguém clicar em "Salvar Pedido". Qualquer queda de conexão
+# (wifi fraco no depósito, celular trocando de antena, aba parada) mata a sessão,
+# o editor é remontado a partir do banco e a digitação some.
+#
+# Aqui cada célula confirmada (Enter/Tab) é gravada na hora. O data_editor JÁ
+# dispara um rerun a cada edição, então não há viagem extra ao servidor — só a
+# gravação. Como o grid é carregado de pedidos_lancamentos, a recuperação é
+# automática: caiu, recarregou, está tudo na tela.
+#
+# Os registros nascem com confirmado=False (digitação em andamento). O botão
+# Salvar Pedido marca tudo como confirmado=True — é isso que faz a loja ficar
+# verde no painel "Status de Digitação", preservando o sentido de "terminou".
+# ─────────────────────────────────────────────────────────────────────────────
+def autosalvar_qtd(setor: str, num_loja: int, chave_grid: str, df_ref: pd.DataFrame,
+                   usa_texto: bool, usuario: str):
+    estado = st.session_state.get(chave_grid) or {}
+    edicoes = dict(estado.get("edited_rows") or {})
+    if not edicoes:
+        return
+
+    supabase = obter_supabase()
+    hoje = str(data_brasilia())
+    gravados, erro = [], None
+
+    for pos, campos in edicoes.items():
+        if "Qtde Pedida" not in campos:
+            gravados.append(pos)          # edição em outra coluna: nada a gravar
+            continue
+        try:
+            # 'pos' é a posição da linha no df ENTREGUE ao editor — por isso o
+            # df_filtrado leva reset_index antes de ser passado.
+            cod = int(df_ref.iloc[int(pos)]["codigo"])
+        except Exception:
+            gravados.append(pos)
+            continue
+
+        bruto = campos.get("Qtde Pedida")
+        try:
+            # regrava só este produto: apaga o que houver e insere o valor novo
+            supabase.table("pedidos_lancamentos").delete() \
+                .eq("setor", setor).eq("loja", num_loja).eq("codigo_produto", cod).execute()
+
+            if usa_texto:
+                val_txt = valor_qtd_texto(bruto)
+                if val_txt != "":
+                    supabase.table("pedidos_lancamentos").insert({
+                        "data_pedido": hoje, "setor": setor, "loja": num_loja,
+                        "codigo_produto": cod, "quantidade": 0,
+                        "quantidade_texto": val_txt, "usuario": usuario,
+                        "confirmado": False,
+                    }).execute()
+            else:
+                q = converter_para_int_seguro(bruto)
+                if q > 0:
+                    supabase.table("pedidos_lancamentos").insert({
+                        "data_pedido": hoje, "setor": setor, "loja": num_loja,
+                        "codigo_produto": cod, "quantidade": q,
+                        "usuario": usuario, "confirmado": False,
+                    }).execute()
+            gravados.append(pos)
+        except Exception as e:
+            erro = str(e)
+            break   # não insiste em cascata: o que sobrou fica na tela
+
+    # Limpa do delta APENAS o que foi gravado. O que falhou continua no editor,
+    # visível para a loja, e é retentado na próxima edição. Sem esta limpeza o
+    # edited_rows acumula e cada Enter regravaria todas as células anteriores.
+    restantes = {p: c for p, c in edicoes.items() if p not in gravados}
+    novo_estado = dict(estado)
+    novo_estado["edited_rows"] = restantes
+    st.session_state[chave_grid] = novo_estado
+    st.session_state[f"autosave_erro_{setor}_{num_loja}"] = erro
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 🪟 MODAIS DE CONFIRMAÇÃO (janelas centralizadas, aparecem sobre a tela)
 # ─────────────────────────────────────────────────────────────────────────────
 @st.dialog("🚨 Confirmação Necessária")
@@ -1914,7 +1992,7 @@ def iniciar_tela(setor: str):
         df_prod = carregar_produtos(setor).copy()
         texto_setor = setor_pedido_texto(setor)   # Embalagens/Matéria Prima/Padaria: pedem em texto
         # 📌 Persistente: SEM filtro de data — mostra tudo que está pendente
-        resp_ped = supabase.table("pedidos_lancamentos").select("id, codigo_produto, loja, quantidade, quantidade_texto").eq("setor", setor).execute()
+        resp_ped = supabase.table("pedidos_lancamentos").select("id, codigo_produto, loja, quantidade, quantidade_texto, confirmado").eq("setor", setor).execute()
         
         df_ped = dedup_pedidos(pd.DataFrame(resp_ped.data))
         
@@ -1933,7 +2011,13 @@ def iniciar_tela(setor: str):
 
         # Lojas que declararam "Sem Pedido Hoje" (Açougue Adriano / Especiais) → ficam verdes
         lojas_sem_pedido = carregar_sem_pedido(setor, str(data_brasilia())) if setor_usa_sem_pedido(setor) else set()
-        exibir_status_digitacao_lojas(df_ped, lojas_sem_pedido)
+        # 🟢 Verde = loja CONFIRMOU (clicou em Salvar). O que está sendo digitado
+        # agora (confirmado=False) já aparece nas quantidades, mas não pinta a
+        # loja de verde — senão o painel perderia o sentido de "terminou".
+        df_ped_confirmado = df_ped
+        if not df_ped.empty and "confirmado" in df_ped.columns:
+            df_ped_confirmado = df_ped[df_ped["confirmado"].fillna(True) == True]
+        exibir_status_digitacao_lojas(df_ped_confirmado, lojas_sem_pedido)
         
         if not df_ped.empty:
             if texto_setor:
@@ -2243,7 +2327,7 @@ def iniciar_tela(setor: str):
         df_med = carregar_medias(num_loja).copy()
         # 📌 Persistente: SEM filtro de data — o pedido pendente da loja aparece
         # até ser salvo por cima, zerado ("Sem Pedido") ou limpo pelo admin.
-        resp_exis = supabase.table("pedidos_lancamentos").select("id, codigo_produto, quantidade, quantidade_texto").eq("setor", setor).eq("loja", num_loja).execute()
+        resp_exis = supabase.table("pedidos_lancamentos").select("id, codigo_produto, quantidade, quantidade_texto, confirmado").eq("setor", setor).eq("loja", num_loja).execute()
 
         df_exis = dedup_pedidos(pd.DataFrame(resp_exis.data))
         if df_exis is not None and not df_exis.empty:
@@ -2367,6 +2451,9 @@ def iniciar_tela(setor: str):
             df_filtrado = df_final_grid[mask]
         else:
             df_filtrado = df_final_grid
+        # o autosave localiza a linha editada por POSIÇÃO (edited_rows), então o
+        # índice precisa ser 0..n-1 depois da ordenação/filtro/busca
+        df_filtrado = df_filtrado.reset_index(drop=True)
 
         col_cfg_l = {
             "codigo": None,
@@ -2400,7 +2487,19 @@ def iniciar_tela(setor: str):
         # Linha mais alta só quando há miniatura, senão a imagem fica espremida
         # na altura padrão (~35px) e a loja não consegue enxergar o produto.
         altura_linha = 90 if (usa_foto and foto_como_miniatura(setor)) else None
-        grid_editado = st.data_editor(df_filtrado, column_config=col_cfg_l, hide_index=True, use_container_width=False, row_height=altura_linha, key=f"grid_loja_{num_loja}_{filtro_forn}")
+        _chave_grid = f"grid_loja_{num_loja}_{filtro_forn}"
+        grid_editado = st.data_editor(
+            df_filtrado, column_config=col_cfg_l, hide_index=True,
+            use_container_width=False, row_height=altura_linha, key=_chave_grid,
+            on_change=autosalvar_qtd,
+            args=(setor, num_loja, _chave_grid, df_filtrado, usa_texto, usuario_atual),
+        )
+
+        # ⚠️ se alguma gravação automática falhou, a loja precisa saber na hora
+        _erro_auto = st.session_state.get(f"autosave_erro_{setor}_{num_loja}")
+        if _erro_auto:
+            st.error(f"⚠️ Não consegui salvar automaticamente o último item: {_erro_auto}\n\n"
+                     "Confira sua conexão e clique em 💾 Salvar Pedido.")
 
         # ⚠️ ITEM 3 — alerta de pedido muito acima da média (10x). grid_editado já traz
         # os valores digitados (mesmo antes de salvar), então o alerta atualiza na hora.
@@ -2418,6 +2517,12 @@ def iniciar_tela(setor: str):
                     hide_index=True, use_container_width=True,
                     column_config={"Média (90d)": st.column_config.NumberColumn(format="%.2f")},
                 )
+
+        # 🔵 Digitação em andamento: já está salva, mas ainda não foi confirmada
+        if not df_exis.empty and "confirmado" in df_exis.columns:
+            if (df_exis["confirmado"].fillna(True) == False).any():
+                st.info("💾 Sua digitação está sendo salva automaticamente. "
+                        "Ao terminar, clique em **Salvar Pedido** para confirmar o envio.")
 
         # 📝 Campo de Observação Geral da Loja (no final dos pedidos)
         obs_loja = ""
@@ -2483,17 +2588,22 @@ def iniciar_tela(setor: str):
                         if usa_texto:
                             val_txt = valor_qtd_texto(r["Qtde Pedida"])
                             if val_txt != "":
-                                lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": 0, "quantidade_texto": val_txt, "usuario": usuario_atual})
+                                lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": 0, "quantidade_texto": val_txt, "usuario": usuario_atual, "confirmado": True})
                         else:
                             q = converter_para_int_seguro(r["Qtde Pedida"])
                             if q > 0: 
-                                lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
+                                lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual, "confirmado": True})
                     
                     if lista_ins: 
                         supabase.table("pedidos_lancamentos").insert(lista_ins).execute()
                         # se a loja tinha declarado "sem pedido" e agora lançou itens, tira a marca
                         if usa_sem_pedido:
                             remover_sem_pedido(setor, num_loja, str(data_brasilia()))
+
+                # ✅ confirma TODO o pedido desta loja — inclusive o que o autosave
+                # gravou sob outro filtro de fornecedor, que o bloco acima não
+                # regrava (ele só enxerga os códigos da tela atual).
+                supabase.table("pedidos_lancamentos").update({"confirmado": True}).eq("setor", setor).eq("loja", num_loja).execute()
 
                 # 📝 grava a Observação Geral da Loja (embalagem/padaria/confeitaria)
                 if usa_obs:
