@@ -16,6 +16,16 @@ from openpyxl import Workbook
 
 LOJAS_NOMES = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
 
+# ⚠️ Alerta de pedido fora da curva na Separação: acende quando a loja pede mais
+# de N vezes a média 90d daquele produto NAQUELA loja. Ajuste livre — é só mudar
+# o número aqui. Produto com média 0 nunca acende (falta de histórico não é
+# exagero) e setor que pede em texto também não entra.
+FATOR_ALERTA_MEDIA = 3.0
+
+# Setores onde o alerta aparece (comparação por "contém", em minúsculas).
+# Deixe a lista VAZIA para valer em todo setor que tenha média.
+SETORES_ALERTA_MEDIA = ["flv normal", "flv oferta"]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🚚 MAPA FIXO FORNECEDOR → PRODUTOS (por código Iceasa) — usado só no FLV.
 # Não vai pro banco: a visão "Pedido por Fornecedor" só PUXA quantidade (pedidos)
@@ -393,6 +403,13 @@ VIEWS_MEDIA = {
 def setor_usa_media(setor) -> bool:
     # Embalagem/Padaria/Confeitaria/Matéria Prima e Peças Açougue-Manoel NÃO usam a coluna Média.
     return not setor_pedido_texto(setor) and not setor_eh_pecas_manoel(setor)
+
+def setor_usa_alerta_media(setor) -> bool:
+    # Alerta de pedido fora da curva: restrito a SETORES_ALERTA_MEDIA (vazio = todos).
+    if not SETORES_ALERTA_MEDIA:
+        return True
+    s = _normaliza_setor(setor)
+    return any(x in s for x in SETORES_ALERTA_MEDIA)
 
 def filtro_media_padrao(setor) -> str:
     # Filtro de média já pré-selecionado por setor (o admin ainda pode trocar).
@@ -1009,6 +1026,32 @@ def carregar_medias(num_loja: int) -> pd.DataFrame:
     supabase = obter_supabase()
     resp = supabase.table("pedidos_medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
     return pd.DataFrame(resp.data)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def carregar_medias_matriz(codigos: tuple) -> dict:
+    # Médias das 8 lojas de uma vez, para a Separação: {(loja, codigo): media}.
+    # Vai UMA consulta por loja de propósito — o PostgREST devolve no máximo 1000
+    # linhas por requisição, e 135 produtos x 8 lojas passaria desse teto numa
+    # consulta só (o corte seria silencioso e alertas sumiriam sem aviso).
+    if not codigos:
+        return {}
+    supabase = obter_supabase()
+    mapa = {}
+    lista = list(codigos)
+    for n in range(1, len(LOJAS_NOMES) + 1):
+        try:
+            resp = (supabase.table("pedidos_medias_90d")
+                    .select("codigo_produto, media_dia")
+                    .eq("loja", n).in_("codigo_produto", lista).execute())
+        except Exception:
+            continue
+        for reg in (resp.data or []):
+            try:
+                mapa[(n, int(reg["codigo_produto"]))] = float(reg.get("media_dia") or 0)
+            except (TypeError, ValueError):
+                pass
+    return mapa
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ⏱️ SINCRONIZAÇÃO DAS MÉDIAS 90d — consulta filtrada + trava de 1x por dia
@@ -2142,7 +2185,62 @@ def iniciar_tela(setor: str):
         else:
             cols_ini = ["Fornecedor", "codigo"]
             ordem_sep = ["Fornecedor", "Descrição"]
-        df_exibicao = df_consolidado[cols_ini + cols_cod + ["Descrição"] + LOJAS_NOMES + cols_total + cols_extras].sort_values(by=ordem_sep)
+        df_exibicao = df_consolidado[cols_ini + cols_cod + ["Descrição"] + LOJAS_NOMES + cols_total + cols_extras].sort_values(by=ordem_sep).copy()
+
+        # ─────────────────────────────────────────────────────────────────────
+        # ⚠️ PEDIDO FORA DA CURVA
+        # Marca, por linha, quais lojas pediram acima de FATOR_ALERTA_MEDIA x a
+        # média 90d daquele produto naquela loja. A coluna é NÃO EDITÁVEL de
+        # propósito: o st.data_editor só aplica estilo do pandas.Styler em
+        # colunas bloqueadas — nas colunas de loja, que o admin ajusta, a cor
+        # seria simplesmente ignorada.
+        # ─────────────────────────────────────────────────────────────────────
+        COL_ALERTA = "⚠️"
+        usa_alerta = setor_usa_media(setor) and not texto_setor and setor_usa_alerta_media(setor)
+        alertas_lista = []
+        if usa_alerta and not df_exibicao.empty:
+            mapa_med = carregar_medias_matriz(tuple(sorted({int(c) for c in df_exibicao["codigo"].dropna()})))
+            marcas = []
+            for _, _lin in df_exibicao.iterrows():
+                try:
+                    _cod = int(_lin["codigo"])
+                except (TypeError, ValueError):
+                    marcas.append("")
+                    continue
+                _estouraram = []
+                for _nome_loja in LOJAS_NOMES:
+                    _q = converter_para_int_seguro(_lin.get(_nome_loja))
+                    if _q <= 0:
+                        continue
+                    _n = int(str(_nome_loja).split()[-1])
+                    _med = mapa_med.get((_n, _cod), 0.0)
+                    if _med > 0 and _q > FATOR_ALERTA_MEDIA * _med:
+                        _estouraram.append(f"L{_n:02d}")
+                        alertas_lista.append({
+                            "Cód. ERP": _cod,
+                            "Descrição": _lin.get("Descrição", ""),
+                            "Loja": _nome_loja,
+                            "Pedido": _q,
+                            "Média": round(_med, 2),
+                            "Vezes": round(_q / _med, 1),
+                        })
+                marcas.append(" ".join(_estouraram))
+            if any(marcas):
+                df_exibicao.insert(list(df_exibicao.columns).index("Descrição") + 1, COL_ALERTA, marcas)
+
+        # 📋 Painel de exceções: lista curta para o comprador conferir de uma vez
+        if alertas_lista:
+            df_fora_curva = pd.DataFrame(alertas_lista).sort_values("Vezes", ascending=False)
+            with st.expander(f"⚠️ {len(df_fora_curva)} pedido(s) acima de {FATOR_ALERTA_MEDIA:g}x a média — conferir antes de fechar"):
+                st.dataframe(
+                    # sem background_gradient de propósito: ele exige matplotlib,
+                    # que não está no requirements.txt do projeto
+                    df_fora_curva.style.apply(
+                        lambda col: ["background-color:#ffd5d5; color:#a80000; font-weight:700"] * len(col),
+                        subset=["Vezes"],
+                    ),
+                    hide_index=True, use_container_width=True,
+                )
 
         col_cfg = {
             "codigo": None, 
@@ -2161,6 +2259,11 @@ def iniciar_tela(setor: str):
             col_cfg["Observação"] = st.column_config.TextColumn("Observação:", width=240, help="Observação do item — sai também na exportação Excel.")
         for loja in LOJAS_NOMES: 
             col_cfg[loja] = st.column_config.TextColumn(loja, width=72, disabled=False)
+        if COL_ALERTA in df_exibicao.columns:
+            col_cfg[COL_ALERTA] = st.column_config.TextColumn(
+                COL_ALERTA, disabled=True, width=88,
+                help=f"Lojas que pediram acima de {FATOR_ALERTA_MEDIA:g}x a média 90d deste produto.",
+            )
 
         # 🧹 Antes de desenhar o editor: troca por vazio qualquer célula de Preço/Observação
         # que o usuário apagou (o data_editor guarda 'None' no estado e mostra "None" na tela).
@@ -2173,7 +2276,16 @@ def iniciar_tela(setor: str):
                         if _c in _ch and _ch[_c] is None:
                             _ch[_c] = ""
 
-        df_editado = st.data_editor(df_exibicao, hide_index=True, use_container_width=True, height=500, column_config=col_cfg, key="editor_separacao")
+        # O Styler só pega em coluna bloqueada — por isso a cor vai na coluna ⚠️
+        # e não nas células de loja (que precisam continuar editáveis aqui).
+        _dados_grade = df_exibicao
+        if COL_ALERTA in df_exibicao.columns:
+            _dados_grade = df_exibicao.style.apply(
+                lambda col: ["background-color:#ffd5d5; color:#a80000; font-weight:700" if str(v).strip() else "" for v in col],
+                subset=[COL_ALERTA],
+            )
+
+        df_editado = st.data_editor(_dados_grade, hide_index=True, use_container_width=True, height=500, column_config=col_cfg, key="editor_separacao")
 
         # 🛡️ Alterações não salvas: compara lojas + (preço/obs no FLV)
         cols_guarda = LOJAS_NOMES + cols_extras
@@ -2182,7 +2294,9 @@ def iniciar_tela(setor: str):
         guardar_contra_saida(orig_sep != edit_sep)
         
         # 🔥 Impressão: troca "-" por vazio; FLV imprime o Iceasa (ERP sai). Preço/Obs ficam fora da impressão por ora.
-        df_print_sep = df_exibicao.drop(columns=['codigo', 'R$ Preço', 'Observação'], errors='ignore').fillna('').replace("-", "")
+        # COL_ALERTA fica de fora: o alerta é ferramenta de conferência na tela,
+        # não faz sentido no papel que vai para o fornecedor/separação.
+        df_print_sep = df_exibicao.drop(columns=['codigo', 'R$ Preço', 'Observação', COL_ALERTA], errors='ignore').fillna('').replace("-", "")
         if usa_iceasa:
             df_print_sep['Cód. Iceasa'] = df_print_sep['Cód. Iceasa'].apply(iceasa_para_impressao)
             df_print_sep = df_print_sep.drop(columns=['Cód. ERP'], errors='ignore')
@@ -2193,7 +2307,7 @@ def iniciar_tela(setor: str):
         with c_salvar: 
             btn_salvar = st.button("💾 Salvar Ajustes Administrativos", type="primary", use_container_width=True)
         with c_excel:
-            df_export = df_editado.drop(columns=['codigo'], errors='ignore')
+            df_export = df_editado.drop(columns=['codigo', COL_ALERTA], errors='ignore')
             # 📦 FLV Normal e FLV Ofertas usam o modelo "PEDIDO BOX"; demais setores seguem o padrão
             if str(setor).strip().lower() in ("flv normal", "flv ofertas"):
                 if filtro_selecionado == "Todos" and "Fornecedor" in df_export.columns:
