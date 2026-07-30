@@ -5,6 +5,7 @@ import time
 import requests
 from datetime import date, datetime, timezone, timedelta
 from supabase import create_client, Client
+from sqlalchemy import text
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ⚙️ CONSTANTES, ESTILOS E CONEXÕES GLOBAIS
@@ -1009,43 +1010,245 @@ def carregar_medias(num_loja: int) -> pd.DataFrame:
     resp = supabase.table("pedidos_medias_90d").select("codigo_produto, media_dia").eq("loja", num_loja).execute()
     return pd.DataFrame(resp.data)
 
-def sincronizar_medias_setor(setor: str, view_sql: str) -> tuple:
-    # Puxa a média do período (view do ERP) e regrava medias_90d p/ os produtos do setor.
-    # Reutilizada pelo botão "Puxar Médias do ERP" e pela atualização automática ao abrir a loja.
+# ─────────────────────────────────────────────────────────────────────────────
+# ⏱️ SINCRONIZAÇÃO DAS MÉDIAS 90d — consulta filtrada + trava de 1x por dia
+#
+# Antes: `SELECT * FROM "view"` puxava a view inteira (todos os produtos de todas
+# as lojas) e filtrava no pandas — era isso que estourava o statement_timeout na
+# python_90dSEXSABDOM. Agora o filtro vai no WHERE e a carga roda no máximo 1x
+# por dia por setor+view, com lock que sobrevive a F5 / troca de aba / novo login
+# (o st.session_state não sobrevive).
+#
+# Tabela de controle: pedidos_medias_sync (setor, view_sql) — se ela não existir,
+# tudo continua funcionando, só sem a trava (fail-open).
+# ─────────────────────────────────────────────────────────────────────────────
+TABELA_SYNC_MEDIAS = "pedidos_medias_sync"
+TIMEOUT_ERP_MS = 240000   # 4 min de folga, só para a consulta da view de médias
+LOCK_MINUTOS = 10         # depois disso, um 'rodando' é considerado órfão
+
+
+def _agora_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_ts(v):
+    # timestamptz do Supabase ("2026-07-30T11:22:33.456+00:00") -> datetime aware
+    if not v:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def colunas_view_erp(view_sql: str) -> list:
+    # Nomes REAIS das colunas da view, na ordem de declaração. O código sempre
+    # tratou as 3 primeiras por posição; aqui pegamos os nomes no catálogo do
+    # Postgres (instantâneo) para poder montar o WHERE sem ler os dados.
+    sql = """
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = :v
+          AND table_schema NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY ordinal_position
+    """
+    df = conn_pg.query(sql, params={"v": view_sql}, ttl=3600)
+    return df["column_name"].tolist() if not df.empty else []
+
+
+def consultar_erp(sql: str, timeout_ms: int = TIMEOUT_ERP_MS) -> pd.DataFrame:
+    # SET LOCAL vale só dentro desta transação — não fica preso no pooler nem
+    # afeta as outras consultas do app (busca de estoque etc.).
+    with conn_pg.session as s:
+        s.execute(text(f"SET LOCAL statement_timeout = {int(timeout_ms)}"))
+        return pd.DataFrame(s.execute(text(sql)).mappings().all())
+
+
+def ler_status_medias(setor: str, view_sql: str) -> dict:
+    # Linha de controle do par setor+view. {} = tabela ausente/erro → trava off.
+    try:
+        supabase = obter_supabase()
+        resp = (supabase.table(TABELA_SYNC_MEDIAS)
+                .select("data_sync, status, qtd, mensagem, versao, atualizado_em")
+                .eq("setor", setor).eq("view_sql", view_sql).limit(1).execute())
+        return (resp.data or [{}])[0]
+    except Exception:
+        return {}
+
+
+def _garantir_linha_sync(setor: str, view_sql: str) -> bool:
+    # Cria a linha de controle se não existir. ignore_duplicates: não zera a
+    # linha de quem já rodou. False = tabela indisponível → segue sem trava.
+    try:
+        obter_supabase().table(TABELA_SYNC_MEDIAS).upsert(
+            {"setor": setor, "view_sql": view_sql},
+            on_conflict="setor,view_sql", ignore_duplicates=True,
+        ).execute()
+        return True
+    except Exception:
+        return False
+
+
+def _reservar_sync(setor: str, view_sql: str, versao_lida) -> bool:
+    # "Pega o bastão": update condicional na versão que acabamos de ler. Se outra
+    # sessão reservou no meio do caminho, a versão já mudou, o update não acha
+    # linha nenhuma (resp.data vazio) e esta sessão não roda.
+    try:
+        v = int(versao_lida or 0)
+        resp = (obter_supabase().table(TABELA_SYNC_MEDIAS)
+                .update({
+                    "status": "rodando",
+                    "data_sync": str(data_brasilia()),
+                    "versao": v + 1,
+                    "atualizado_em": _agora_utc().isoformat(),
+                })
+                .eq("setor", setor).eq("view_sql", view_sql)
+                .eq("versao", v).execute())
+        return bool(resp.data)
+    except Exception:
+        return True   # fail-open: na dúvida, atualizar é melhor que não atualizar
+
+
+def _finalizar_sync(setor: str, view_sql: str, status: str, qtd: int, mensagem: str):
+    # Fecha a trava. Em caso de ERRO, data_sync volta a NULL: a trava do dia não
+    # é consumida por uma tentativa que falhou (senão um timeout às 7h bloquearia
+    # a atualização até o dia seguinte).
+    try:
+        obter_supabase().table(TABELA_SYNC_MEDIAS).update({
+            "status": status,
+            "qtd": int(qtd or 0),
+            "mensagem": (str(mensagem or ""))[:400],
+            "data_sync": str(data_brasilia()) if status == "ok" else None,
+            "atualizado_em": _agora_utc().isoformat(),
+        }).eq("setor", setor).eq("view_sql", view_sql).execute()
+    except Exception:
+        pass
+
+
+def texto_status_medias(setor: str, view_sql: str) -> str:
+    # Legenda da lateral do admin. Horário convertido para Brasília (UTC-3).
+    d = ler_status_medias(setor, view_sql)
+    if not d:
+        return ""
+    ts = _parse_ts(d.get("atualizado_em"))
+    quando = (ts - timedelta(hours=3)).strftime("%d/%m às %H:%M") if ts else "?"
+    status = d.get("status")
+    if status == "rodando":
+        return f"⏳ Atualizando desde {quando}..."
+    if status == "erro":
+        return f"⚠️ Última tentativa falhou ({quando}) — pode tentar de novo."
+    if d.get("data_sync") == str(data_brasilia()):
+        return f"✅ Atualizado hoje {quando} — {int(d.get('qtd') or 0)} registros."
+    return f"🕗 Última atualização: {quando}."
+
+
+def _executar_sync_medias(setor: str, view_sql: str) -> tuple:
+    # O trabalho de verdade, sem lógica de trava.
+    supabase = obter_supabase()
+
+    resp_prod = supabase.table("pedidos_produtos").select("codigo, codigo_erp").eq("setor", setor).execute()
+    df_prod = pd.DataFrame(resp_prod.data)
+    if df_prod.empty:
+        return (False, 0, "Nenhum produto cadastrado neste setor.")
+
+    df_prod = df_prod.rename(columns={"codigo": "codigo_pk_interna"})
+    if "codigo_erp" not in df_prod.columns:
+        df_prod["codigo_erp"] = df_prod["codigo_pk_interna"]
+    df_prod["codigo_erp"] = (
+        pd.to_numeric(df_prod["codigo_erp"], errors="coerce")
+          .fillna(df_prod["codigo_pk_interna"]).astype(int)
+    )
+
+    # codigo_erp = 0 fica fora (registros soltos que não existem no ERP)
+    codigos = sorted({int(c) for c in df_prod["codigo_erp"] if int(c) > 0})
+    if not codigos:
+        return (False, 0, "Nenhum produto com código ERP válido neste setor.")
+
+    cols = colunas_view_erp(view_sql)
+    if len(cols) < 3:
+        return (False, 0, f'Não consegui ler as colunas da view "{view_sql}" no ERP.')
+    c_loja, c_cod, c_med = cols[0], cols[1], cols[2]
+
+    # ints vindos do nosso próprio banco — sem risco de injeção
+    lista_cods = ",".join(str(c) for c in codigos)
+    sql = f'''
+        SELECT "{c_loja}" AS loja, "{c_cod}" AS codigo_erp, "{c_med}" AS media_dia
+        FROM "{view_sql}"
+        WHERE "{c_cod}" IN ({lista_cods})
+    '''
+    df_erp = consultar_erp(sql)
+    if df_erp.empty:
+        return (False, 0, f'A view "{view_sql}" não retornou dados para os produtos deste setor.')
+
+    df_erp["codigo_erp"] = pd.to_numeric(df_erp["codigo_erp"], errors="coerce")
+    df_erp = df_erp.dropna(subset=["codigo_erp"])
+    df_erp["codigo_erp"] = df_erp["codigo_erp"].astype(int)
+
+    df_m = df_erp.merge(df_prod[["codigo_pk_interna", "codigo_erp"]], on="codigo_erp", how="inner")
+    if df_m.empty:
+        return (False, 0, "Nenhum código do setor casou com a view do ERP.")
+
+    df_m["loja"] = pd.to_numeric(df_m["loja"], errors="coerce").fillna(0).astype(int)
+    df_m["media_dia"] = pd.to_numeric(df_m["media_dia"], errors="coerce").fillna(0.0)
+    df_m = df_m.drop_duplicates(subset=["loja", "codigo_pk_interna"], keep="last")
+
+    # int()/float() nativos: numpy.int64 não é serializável pelo cliente Supabase
+    registros = [
+        {"loja": int(l), "codigo_produto": int(c), "media_dia": float(m)}
+        for l, c, m in zip(df_m["loja"], df_m["codigo_pk_interna"], df_m["media_dia"])
+    ]
+
+    pks = [int(x) for x in df_prod["codigo_pk_interna"].unique()]
+    for i in range(0, len(pks), 500):
+        supabase.table("pedidos_medias_90d").delete().in_("codigo_produto", pks[i:i + 500]).execute()
+    for i in range(0, len(registros), 1000):
+        supabase.table("pedidos_medias_90d").insert(registros[i:i + 1000]).execute()
+
+    carregar_medias.clear()   # a loja vê a média nova sem esperar o TTL de 5 min
+    return (True, len(registros), "ok")
+
+
+def sincronizar_medias_setor(setor: str, view_sql: str, forcar: bool = False) -> tuple:
+    # Puxa a média do período (view do ERP) e regrava pedidos_medias_90d.
+    # Botão "Puxar Médias do ERP" → forcar=True (clique manual sempre refaz).
+    # Atualização automática ao abrir a tela → forcar=False (respeita a trava).
     # Retorna (sucesso: bool, qtd: int, msg: str).
     if not erp_ativo():
         return (False, 0, "🔌 ERP desligado (ERP_ATIVO = false) — médias mantidas como estão.")
-    supabase = obter_supabase()
-    resp_prod = supabase.table("pedidos_produtos").select("codigo, codigo_erp").eq("setor", setor).execute()
-    df_prod_map = pd.DataFrame(resp_prod.data)
-    if df_prod_map.empty:
-        return (False, 0, "Nenhum produto cadastrado neste setor.")
-    df_prod_map = df_prod_map.rename(columns={'codigo': 'codigo_pk_interna'})
-    if 'codigo_erp' not in df_prod_map.columns:
-        df_prod_map['codigo_erp'] = df_prod_map['codigo_pk_interna']
-    df_prod_map['codigo_erp'] = df_prod_map['codigo_erp'].fillna(df_prod_map['codigo_pk_interna']).astype(int)
-    codigos_erp_setor = df_prod_map['codigo_erp'].unique().tolist()
-    df_erp = conn_pg.query(f'SELECT * FROM "{view_sql}"', ttl=0)
-    if df_erp.empty:
-        return (False, 0, "View do ERP retornou vazia.")
-    c_loja, c_cod_erp, c_med = df_erp.columns[0], df_erp.columns[1], df_erp.columns[2]
-    df_erp_setor = df_erp[df_erp[c_cod_erp].isin(codigos_erp_setor)]
-    if df_erp_setor.empty:
-        return (False, 0, "View vazia para estes produtos.")
-    df_merged = pd.merge(df_erp_setor, df_prod_map, left_on=c_cod_erp, right_on='codigo_erp', how='inner')
-    codigos_pks = df_merged['codigo_pk_interna'].unique().tolist()
-    for i in range(0, len(codigos_pks), 200):
-        supabase.table("pedidos_medias_90d").delete().in_("codigo_produto", codigos_pks[i:i+200]).execute()
-    lista_insert = []
-    for _, row in df_merged.iterrows():
-        lista_insert.append({
-            "loja": int(row[c_loja]),
-            "codigo_produto": int(row['codigo_pk_interna']),
-            "media_dia": float(row[c_med]) if pd.notna(row[c_med]) else 0.0
-        })
-    for i in range(0, len(lista_insert), 1000):
-        supabase.table("pedidos_medias_90d").insert(lista_insert[i:i+1000]).execute()
-    return (True, len(lista_insert), "ok")
+
+    hoje = str(data_brasilia())
+    trava_ok = _garantir_linha_sync(setor, view_sql)
+    ctrl = ler_status_medias(setor, view_sql) if trava_ok else {}
+
+    if trava_ok:
+        # 1) já rodou hoje com sucesso → nada a fazer (a menos que seja manual)
+        if not forcar and ctrl.get("data_sync") == hoje and ctrl.get("status") == "ok":
+            return (True, int(ctrl.get("qtd") or 0),
+                    f"⏭️ Médias de {view_sql} já foram atualizadas hoje.")
+
+        # 2) alguém está rodando agora → não duplica a varredura no ERP
+        ts = _parse_ts(ctrl.get("atualizado_em"))
+        if (ctrl.get("status") == "rodando" and ts
+                and (_agora_utc() - ts) < timedelta(minutes=LOCK_MINUTOS)):
+            return (False, 0, "⏳ Outra sessão já está atualizando estas médias. "
+                              "Aguarde um instante e use 🔄 Sincronizar Dados.")
+
+        # 3) tenta pegar o bastão
+        if not _reservar_sync(setor, view_sql, ctrl.get("versao")):
+            return (False, 0, "⏳ Outra sessão pegou a atualização primeiro. "
+                              "Aguarde e use 🔄 Sincronizar Dados.")
+
+    try:
+        ok, qtd, msg = _executar_sync_medias(setor, view_sql)
+    except Exception as e:
+        if trava_ok:
+            _finalizar_sync(setor, view_sql, "erro", 0, str(e))
+        raise   # o chamador já trata e mostra o erro na tela
+
+    if trava_ok:
+        _finalizar_sync(setor, view_sql, "ok" if ok else "erro", qtd, msg)
+    return (ok, qtd, msg)
 
 def carregar_extras(setor: str) -> pd.DataFrame:
     # Preço/observação (preenchidos manualmente na Separação). SEM cache, pois
@@ -1676,12 +1879,18 @@ def iniciar_tela(setor: str):
             
             if not erp_ativo():
                 st.caption("🔌 ERP desligado (ERP_ATIVO = false) — puxar médias está indisponível.")
+            else:
+                # mostra quando esta view foi atualizada por último (tabela pedidos_medias_sync)
+                _txt_status_med = texto_status_medias(setor, VIEWS_MEDIA[view_escolhida])
+                if _txt_status_med:
+                    st.caption(_txt_status_med)
             if st.button("📥 Puxar Médias do ERP", type="secondary", use_container_width=True,
                          disabled=not erp_ativo()):
                 view_sql = VIEWS_MEDIA[view_escolhida]
                 with st.spinner(f"Sincronizando {view_sql}..."):
                     try:
-                        ok, qtd, msg = sincronizar_medias_setor(setor, view_sql)
+                        # forcar=True: o clique manual sempre refaz a carga
+                        ok, qtd, msg = sincronizar_medias_setor(setor, view_sql, forcar=True)
                         if ok:
                             st.success(f"Médias ({view_escolhida}) sincronizadas!")
                             st.cache_data.clear()  # médias mudaram → recarrega na hora
@@ -2015,15 +2224,16 @@ def iniciar_tela(setor: str):
         codigos_setor = df_prod['codigo'].tolist()
         df_perm = buscar_permissoes_setor(supabase, codigos_setor, num_loja)
         
-        # 🔄 Médias automáticas: ao abrir a loja já traz a média do filtro padrão do setor
-        # (1x por sessão por setor+filtro; o admin ainda pode trocar/puxar manualmente na lateral).
+        # 🔄 Médias automáticas: ao abrir a loja já traz a média do filtro padrão do setor.
+        # 1x por sessão (session_state) E no máximo 1x por dia (trava em pedidos_medias_sync).
+        # O admin ainda pode trocar/puxar manualmente na lateral.
         if acesso_total and usa_media and erp_ativo():
             filtro_pad = filtro_media_padrao(setor)
             flag_med = f"med_auto_{setor}_{filtro_pad}"
             if not st.session_state.get(flag_med):
                 try:
                     with st.spinner(f"Atualizando médias ({filtro_pad})..."):
-                        ok_auto, _, _ = sincronizar_medias_setor(setor, VIEWS_MEDIA[filtro_pad])
+                        ok_auto, _, _ = sincronizar_medias_setor(setor, VIEWS_MEDIA[filtro_pad], forcar=False)
                     if ok_auto:
                         carregar_medias.clear()
                 except Exception:
