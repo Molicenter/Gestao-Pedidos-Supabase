@@ -1600,10 +1600,13 @@ def modal_sem_pedido(setor: str, num_loja: int, loja_selecionada: str):
             st.session_state[f"sem_pedido_msg_{setor}_{num_loja}"] = "ok" if enviado else "parcial"
             # limpa o editor (todas as variações de filtro) para a tela voltar zerada
             # inclui o registro do autosave (_autosave_ok_grid_loja_...), senão um
-            # valor idêntico digitado depois seria considerado já gravado
+            # valor idêntico digitado depois seria considerado já gravado, e o
+            # retorno publicado pelo fragment (_grid_ret_grid_loja_...), senão o
+            # código de baixo leria a tela antiga
             for _k in [k for k in list(st.session_state.keys())
                        if str(k).startswith(f"grid_loja_{num_loja}")
-                       or str(k).startswith(f"_autosave_ok_grid_loja_{num_loja}")]:
+                       or str(k).startswith(f"_autosave_ok_grid_loja_{num_loja}")
+                       or str(k).startswith(f"_grid_ret_grid_loja_{num_loja}")]:
                 st.session_state.pop(_k, None)
             st.rerun()
 
@@ -2665,35 +2668,84 @@ def iniciar_tela(setor: str):
         # na altura padrão (~35px) e a loja não consegue enxergar o produto.
         altura_linha = 90 if (usa_foto and foto_como_miniatura(setor)) else None
         _chave_grid = f"grid_loja_{num_loja}_{filtro_forn}"
-        grid_editado = st.data_editor(
-            df_filtrado, column_config=col_cfg_l, hide_index=True,
-            use_container_width=False, row_height=altura_linha, key=_chave_grid,
-            on_change=autosalvar_qtd,
-            args=(setor, num_loja, _chave_grid, df_filtrado, usa_texto, usuario_atual),
+
+        # 📏 Altura fixa do grid: com ela a rolagem acontece DENTRO da tabela e não
+        # na página inteira — a loja "não sai do lugar" ao digitar. A conta é
+        # (nº de linhas x altura da linha) + cabeçalho, limitada a um teto para a
+        # tela não virar um rolo infinito em setor com 400 produtos.
+        _px_linha = altura_linha or 35
+        _teto_grid = 700 if altura_linha else 620
+        altura_grid = min(_px_linha * max(len(df_filtrado), 1) + 45, _teto_grid)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 🧊 BLOCO CONGELADO — st.fragment
+        #
+        # Problema que isto resolve: cada célula digitada dispara o on_change do
+        # autosave e o Streamlit rerodava o SCRIPT INTEIRO. A página era
+        # redesenhada do zero e o scroll voltava para o topo — em pedido grande a
+        # loja digitava no "pinhão" e era jogada de volta no "abacate", tendo que
+        # procurar o produto de novo a cada Enter.
+        #
+        # Com @st.fragment só ESTE pedaço rerroda a cada edição. O restante da
+        # página (métrica, filtros, botões, sidebar) não é redesenhado, o
+        # componente do grid não é remontado e a posição da rolagem se mantém.
+        #
+        # ⚠️ O que fica dentro do fragment não enxerga o que está fora e vice-versa:
+        # por isso o resultado do editor é publicado em session_state, que é de onde
+        # o código de baixo (Excel, guarda de saída, Salvar Pedido) o lê.
+        # ⚠️ Nunca chamar st.rerun() aqui dentro sem scope="app" — voltaria a
+        # rerodar a página toda e o problema retornaria.
+        # ─────────────────────────────────────────────────────────────────────
+        @st.fragment
+        def bloco_digitacao_loja(df_grid, cfg, alt_px, alt_linha, chave,
+                                 setor_f, loja_f, texto_f, media_f, usuario_f):
+            editado = st.data_editor(
+                df_grid, column_config=cfg, hide_index=True,
+                use_container_width=False, row_height=alt_linha, height=alt_px,
+                key=chave,
+                on_change=autosalvar_qtd,
+                args=(setor_f, loja_f, chave, df_grid, texto_f, usuario_f),
+            )
+            # 📤 publica o resultado para o código fora do fragment
+            st.session_state[f"_grid_ret_{chave}"] = editado
+
+            # ⚠️ se alguma gravação automática falhou, a loja precisa saber na hora
+            _erro_auto = st.session_state.get(f"autosave_erro_{setor_f}_{loja_f}")
+            if _erro_auto:
+                st.error(f"⚠️ Não consegui salvar automaticamente o último item: {_erro_auto}\n\n"
+                         "Confira sua conexão e clique em 💾 Salvar Pedido.")
+
+            # ⚠️ ITEM 3 — alerta de pedido muito acima da média (10x). 'editado' já traz
+            # os valores digitados (mesmo antes de salvar), então o alerta atualiza na
+            # hora. Fica DENTRO do fragment justamente para continuar acompanhando cada
+            # tecla — se ficasse fora, só atualizaria quando a página inteira rerodasse.
+            # Só faz sentido onde existe a coluna Média.
+            if media_f:
+                df_check = editado.copy()
+                df_check["_q"] = df_check["Qtde Pedida"].apply(converter_para_int_seguro)
+                df_check["_m"] = pd.to_numeric(df_check["Média (90d)"], errors="coerce").fillna(0.0)
+                # só sinaliza quando há média (>0) — produto novo sem histórico não dá pra julgar
+                df_outliers = df_check[(df_check["_m"] > 0) & (df_check["_q"] > 10 * df_check["_m"])]
+                if not df_outliers.empty:
+                    st.warning(f"⚠️ **{len(df_outliers)} item(ns) com pedido acima de 10x a média.** Confira se não há erro de digitação:")
+                    st.dataframe(
+                        df_outliers[["Cód. ERP", "Descrição", "Média (90d)", "Qtde Pedida"]].rename(columns={"Qtde Pedida": "Pedido"}),
+                        hide_index=True, use_container_width=True,
+                        column_config={"Média (90d)": st.column_config.NumberColumn(format="%.2f")},
+                    )
+
+        bloco_digitacao_loja(
+            df_filtrado, col_cfg_l, altura_grid, altura_linha, _chave_grid,
+            setor, num_loja, usa_texto, usa_media, usuario_atual,
         )
 
-        # ⚠️ se alguma gravação automática falhou, a loja precisa saber na hora
-        _erro_auto = st.session_state.get(f"autosave_erro_{setor}_{num_loja}")
-        if _erro_auto:
-            st.error(f"⚠️ Não consegui salvar automaticamente o último item: {_erro_auto}\n\n"
-                     "Confira sua conexão e clique em 💾 Salvar Pedido.")
-
-        # ⚠️ ITEM 3 — alerta de pedido muito acima da média (10x). grid_editado já traz
-        # os valores digitados (mesmo antes de salvar), então o alerta atualiza na hora.
-        # Só faz sentido onde existe a coluna Média.
-        if usa_media:
-            df_check = grid_editado.copy()
-            df_check["_q"] = df_check["Qtde Pedida"].apply(converter_para_int_seguro)
-            df_check["_m"] = pd.to_numeric(df_check["Média (90d)"], errors="coerce").fillna(0.0)
-            # só sinaliza quando há média (>0) — produto novo sem histórico não dá pra julgar
-            df_outliers = df_check[(df_check["_m"] > 0) & (df_check["_q"] > 10 * df_check["_m"])]
-            if not df_outliers.empty:
-                st.warning(f"⚠️ **{len(df_outliers)} item(ns) com pedido acima de 10x a média.** Confira se não há erro de digitação:")
-                st.dataframe(
-                    df_outliers[["Cód. ERP", "Descrição", "Média (90d)", "Qtde Pedida"]].rename(columns={"Qtde Pedida": "Pedido"}),
-                    hide_index=True, use_container_width=True,
-                    column_config={"Média (90d)": st.column_config.NumberColumn(format="%.2f")},
-                )
+        # 📥 o que o fragment devolveu. Numa rerodada de página inteira (clique em
+        # Salvar, troca de filtro) o fragment roda ANTES desta linha, então o valor
+        # aqui é sempre o da tela atual. O fallback só cobre o caso extremo de o
+        # fragment não ter rodado ainda.
+        grid_editado = st.session_state.get(f"_grid_ret_{_chave_grid}")
+        if grid_editado is None:
+            grid_editado = df_filtrado.copy()
 
         # 🔵 Digitação em andamento: já está salva, mas ainda não foi confirmada
         if not df_exis.empty and "confirmado" in df_exis.columns:
@@ -2787,10 +2839,13 @@ def iniciar_tela(setor: str):
                     salvar_obs_loja(setor, num_loja, obs_loja, usuario_atual)
             # limpa o estado dos editores (todas as variações de filtro) p/ o guarda desligar
             # inclui o registro do autosave (_autosave_ok_grid_loja_...), senão um
-            # valor idêntico digitado depois seria considerado já gravado
+            # valor idêntico digitado depois seria considerado já gravado, e o
+            # retorno publicado pelo fragment (_grid_ret_grid_loja_...), senão o
+            # código de baixo leria a tela antiga
             for _k in [k for k in list(st.session_state.keys())
                        if str(k).startswith(f"grid_loja_{num_loja}")
-                       or str(k).startswith(f"_autosave_ok_grid_loja_{num_loja}")]:
+                       or str(k).startswith(f"_autosave_ok_grid_loja_{num_loja}")
+                       or str(k).startswith(f"_grid_ret_grid_loja_{num_loja}")]:
                 st.session_state.pop(_k, None)
             st.session_state.pop(f"obs_loja_{setor}_{num_loja}", None)
             # ✅ sinaliza sucesso → o modal de confirmação aparece após o rerun
