@@ -1716,9 +1716,17 @@ def modal_sincronizar_espelho(setor_mestre: str, setor_destino: str):
                             sem_erp += 1   # sem Cód. ERP válido (vazio ou 0) não há como casar
                             continue
                         forn = r.get("fornecedor")
+                        v_ice = r.get("codigo_iceasa")
+                        try:
+                            # ⚠️ vem do DataFrame como float (ex.: 19.0) quando a coluna tem
+                            # algum vazio — mandar isso direto pro Supabase quebra o insert/update
+                            # porque a coluna é bigint e "19.0" não é um inteiro válido pra ela.
+                            ice = int(v_ice) if pd.notna(v_ice) and str(v_ice).strip() != "" else None
+                        except (ValueError, TypeError):
+                            ice = None
                         dados = {
                             "codigo_erp": erp,
-                            "codigo_iceasa": r.get("codigo_iceasa"),
+                            "codigo_iceasa": ice,
                             "descricao": r.get("descricao"),
                             "fornecedor": forn,
                             "nome_personalizado": r.get("nome_personalizado"),
