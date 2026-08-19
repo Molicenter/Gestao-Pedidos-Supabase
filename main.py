@@ -319,7 +319,7 @@ if st.session_state['usuario_logado'] is None:
             st.divider()
 
             LOJAS_LOGIN = ["Loja 01", "Loja 02", "Loja 03", "Loja 04", "Loja 05", "Loja 06", "Loja 07", "Loja 08"]
-            usuarios_permitidos = ["Selecione...", "Administrador"] + LOJAS_LOGIN
+            usuarios_permitidos = ["Selecione...", "Administrador", "Ceasa"] + LOJAS_LOGIN
 
             usuario_selecionado = st.selectbox("👤 Usuário de acesso:", usuarios_permitidos)
             senha_digitada = st.text_input("🔑 Senha de acesso:", type="password", autocomplete="off")
@@ -361,6 +361,9 @@ if st.session_state['usuario_logado'] is None:
                 if usuario_selecionado == "Selecione...":
                     st.error("⚠️ Por favor, selecione um usuário.")
                 elif usuario_selecionado == "Administrador" and senha_digitada == "moli0000":
+                    st.session_state['usuario_logado'] = usuario_selecionado
+                    st.rerun()
+                elif usuario_selecionado == "Ceasa" and senha_digitada == "moli0000":
                     st.session_state['usuario_logado'] = usuario_selecionado
                     st.rerun()
                 elif usuario_selecionado in LOJAS_LOGIN and senha_digitada == "moli1234":
@@ -426,22 +429,25 @@ def renderizar_dashboard():
     with c1: criar_card("Folhagem", "Seg a Sáb até 12:00hrs", IMG_FOLHAGEM, "🥬", "flv_folhagem")
     with c2: criar_card("FLV Normal", "Terças-feira até 17:00hrs<br>Quintas-feira até 14:00hrs", IMG_FLV, "🍎", "flv_normal")
     with c3: criar_card("FLV Ofertas", "Quintas-feiras até 14:00hrs", IMG_FLV, "🏷️", "flv_ofertas")
-    with c4: criar_card("FLV Oriental", "Quintas-feiras até 14:00hrs", IMG_ORIENTAL, "🍣", "flv_oriental")
+    # 🥬 Usuário Ceasa: acesso restrito a Folhagem, FLV Normal e FLV Ofertas —
+    # FLV Oriental e as demais seções (Açougue, Outros Setores) ficam ocultas.
+    if loja_logada != "Ceasa":
+        with c4: criar_card("FLV Oriental", "Quintas-feiras até 14:00hrs", IMG_ORIENTAL, "🍣", "flv_oriental")
 
-    # --- LINHA 2 ---
-    st.markdown('<div class="linha-titulo-sec sec-coral">🥩 Setor Açougue e Aves</div>', unsafe_allow_html=True)
-    c1, c2, c3, _ = st.columns(4, gap="medium")
-    with c1: criar_card("Pioneiro + BF + Paraná", "Seg a Sex até 11:00hrs", "Pioneiros.jpg", "🍗", "acougue_especiais")
-    with c2: criar_card("Açougue Adriano", "Quartas-feira até 15:00hrs<br>Sábado até 15:00hrs", IMG_ACOUGUE, "🔪", "acougue_total")
-    with c3: criar_card("Peças Açougue - Manoel", "Seg/Qua/Sex - Arap. 15:00h<br>Ter/Qui/Sáb - Maringá 15:00h", IMG_ACOUGUE, "🥩", "acougue_pecas")
+        # --- LINHA 2 ---
+        st.markdown('<div class="linha-titulo-sec sec-coral">🥩 Setor Açougue e Aves</div>', unsafe_allow_html=True)
+        c1, c2, c3, _ = st.columns(4, gap="medium")
+        with c1: criar_card("Pioneiro + BF + Paraná", "Seg a Sex até 11:00hrs", "Pioneiros.jpg", "🍗", "acougue_especiais")
+        with c2: criar_card("Açougue Adriano", "Quartas-feira até 15:00hrs<br>Sábado até 15:00hrs", IMG_ACOUGUE, "🔪", "acougue_total")
+        with c3: criar_card("Peças Açougue - Manoel", "Seg/Qua/Sex - Arap. 15:00h<br>Ter/Qui/Sáb - Maringá 15:00h", IMG_ACOUGUE, "🥩", "acougue_pecas")
 
-    # --- LINHA 3 ---
-    st.markdown('<div class="linha-titulo-sec sec-ambar">📦 Outros Setores e Logística</div>', unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4, gap="medium")
-    with c1: criar_card("Embalagens", "Sexta-feira até as 17:30hrs", "Embalagens.jpg", "🥡", "embalagem")
-    with c2: criar_card("Padaria e Confeitaria", "Sábado", IMG_PADARIA, "🥖", "padaria_confeitaria")
-    with c3: criar_card("Matéria Prima", "Até Sábado", "materiaprima.jpg", "🌾", "materia_prima")
-    with c4: criar_card("Flores", "Segunda-feira (15 em 15 dias) até as 17:30hrs", IMG_FLORES, "🌸", "flores")
+        # --- LINHA 3 ---
+        st.markdown('<div class="linha-titulo-sec sec-ambar">📦 Outros Setores e Logística</div>', unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns(4, gap="medium")
+        with c1: criar_card("Embalagens", "Sexta-feira até as 17:30hrs", "Embalagens.jpg", "🥡", "embalagem")
+        with c2: criar_card("Padaria e Confeitaria", "Sábado", IMG_PADARIA, "🥖", "padaria_confeitaria")
+        with c3: criar_card("Matéria Prima", "Até Sábado", "materiaprima.jpg", "🌾", "materia_prima")
+        with c4: criar_card("Flores", "Segunda-feira (15 em 15 dias) até as 17:30hrs", IMG_FLORES, "🌸", "flores")
 
     # ─────────────────────────────────────────────
     # RODAPÉ
