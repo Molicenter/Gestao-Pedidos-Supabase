@@ -1040,7 +1040,7 @@ def buscar_permissoes_setor(_supabase_client, codigos_setor, num_loja=None):
 def carregar_produtos(setor: str, somente_ativos: bool = False) -> pd.DataFrame:
     # Catálogo do setor (muda pouco durante o dia). Cacheado por (setor, somente_ativos).
     supabase = obter_supabase()
-    campos = "codigo, codigo_erp, codigo_iceasa, descricao, fornecedor, nome_personalizado"
+    campos = "codigo, codigo_erp, codigo_iceasa, descricao, fornecedor, nome_personalizado, nome_ceasa"
     if setor_eh_flores(setor):
         campos += ", codigo_barra"    # coluna extra exclusiva do setor Flores
     if setor_usa_foto(setor):
@@ -1687,7 +1687,7 @@ def modal_sincronizar_espelho(setor_mestre: str, setor_destino: str):
         if st.button("✔️ Sincronizar agora", type="primary", use_container_width=True, key=f"msync_sim_{setor_mestre}"):
             with st.spinner("Alinhando os dois catálogos..."):
                 try:
-                    campos = "codigo, codigo_erp, codigo_iceasa, descricao, fornecedor, nome_personalizado, ativo"
+                    campos = "codigo, codigo_erp, codigo_iceasa, descricao, fornecedor, nome_personalizado, nome_ceasa, ativo"
                     df_m = pd.DataFrame(supabase.table("pedidos_produtos").select(campos).eq("setor", setor_mestre).execute().data or [])
                     if df_m.empty:
                         st.warning(f"O {setor_mestre} está sem produtos — nada a sincronizar.")
@@ -1730,6 +1730,7 @@ def modal_sincronizar_espelho(setor_mestre: str, setor_destino: str):
                             "descricao": r.get("descricao"),
                             "fornecedor": forn,
                             "nome_personalizado": r.get("nome_personalizado"),
+                            "nome_ceasa": r.get("nome_ceasa"),
                         }
                         dados = {k: (None if pd.isna(v) else v) for k, v in dados.items()}
 
@@ -1781,17 +1782,29 @@ def modal_sincronizar_espelho(setor_mestre: str, setor_destino: str):
 # 🥬 NOME DE EXIBIÇÃO — Regra padrão x exceção do usuário Ceasa
 # Padrão: Nome Manual (nome_personalizado) tem prioridade sobre o Nome Prime
 # (descricao vinda do ERP/Iceasa); se não houver Nome Manual, cai no Nome Prime.
-# Exceção: para o usuário "Ceasa", nos setores FLV Normal e FLV Ofertas, o
-# Nome Prime tem prioridade — é o nome usado para comprar no CEASA/atacado.
+# Exceção: para o usuário "Ceasa", nos setores FLV Normal e FLV Ofertas, existe
+# uma 3ª coluna — "nome_ceasa" — editada manualmente só por esse login (na tela
+# Catálogo de Produtos). Prioridade exclusiva do Ceasa: Nome Ceasa > Nome Manual
+# > Nome Prime (os dois últimos como reserva enquanto o Nome Ceasa não é
+# preenchido para aquele produto).
 # Essa mesma coluna "descricao" alimenta tela, impressão e exportação em todas
 # as visões, então ajustar aqui basta para cobrir os três pedidos.
 # ─────────────────────────────────────────────────────────────────────────────
+def _texto_valido(serie: pd.Series) -> pd.Series:
+    """Converte uma coluna em texto 'limpo', virando None onde estiver vazia/NaN."""
+    return serie.apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None)
+
 def aplicar_nome_exibicao(df_prod, setor, usuario_atual):
     if usuario_atual == "Ceasa" and setor in ("FLV Normal", "FLV Ofertas"):
+        nome_manual_valido = _texto_valido(df_prod['nome_personalizado'])
+        if 'nome_ceasa' in df_prod.columns:
+            nome_ceasa_valido = _texto_valido(df_prod['nome_ceasa'])
+        else:
+            # Coluna ainda não existe no banco (ex.: migração não aplicada) — cai no padrão.
+            nome_ceasa_valido = pd.Series([None] * len(df_prod), index=df_prod.index)
+        df_prod['descricao'] = nome_ceasa_valido.fillna(nome_manual_valido).fillna(df_prod['descricao'])
         return df_prod
-    df_prod['descricao'] = df_prod['nome_personalizado'].apply(
-        lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None
-    ).fillna(df_prod['descricao'])
+    df_prod['descricao'] = _texto_valido(df_prod['nome_personalizado']).fillna(df_prod['descricao'])
     return df_prod
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3310,10 +3323,19 @@ def iniciar_tela(setor: str):
             else: 
                 df_cat_completo[l] = df_cat_completo[l].fillna(True).astype(bool)
         
-        if 'nome_personalizado' not in df_cat_completo.columns: 
+        if 'nome_personalizado' not in df_cat_completo.columns:
             df_cat_completo['nome_personalizado'] = ""
-        else: 
+        else:
             df_cat_completo['nome_personalizado'] = df_cat_completo['nome_personalizado'].fillna("")
+
+        # 🥬 Nome Ceasa: 3ª coluna de nome, editável só pelo login Ceasa, só em
+        # FLV Normal/FLV Ofertas — é a que vira prioridade de exibição pra ele
+        # (ver aplicar_nome_exibicao). Para os demais logins ela nem aparece.
+        mostrar_nome_ceasa = (usuario_atual == "Ceasa" and setor in ("FLV Normal", "FLV Ofertas"))
+        if 'nome_ceasa' not in df_cat_completo.columns:
+            df_cat_completo['nome_ceasa'] = ""
+        else:
+            df_cat_completo['nome_ceasa'] = df_cat_completo['nome_ceasa'].fillna("")
 
         usa_iceasa = setor_usa_iceasa(setor)
         usa_erp = setor_usa_erp(setor)
@@ -3336,6 +3358,8 @@ def iniciar_tela(setor: str):
             "nome_personalizado": st.column_config.TextColumn("Nome Manual", width=160),
             "fornecedor": st.column_config.TextColumn("Fornecedor", width=130)
         }
+        if mostrar_nome_ceasa:
+            col_cfg_c["nome_ceasa"] = st.column_config.TextColumn("Nome Ceasa", width=160)
         if usa_erp:
             col_cfg_c["codigo_erp"] = st.column_config.NumberColumn("Cód. ERP", format="%d", width=80)
         if usa_iceasa:
@@ -3356,7 +3380,7 @@ def iniciar_tela(setor: str):
             cols_base.append("codigo_erp")
         if usa_iceasa:
             cols_base.append("codigo_iceasa")
-        cols_exibicao = cols_base + cols_extra_cat + ["descricao", "nome_personalizado"] + LOJAS_NOMES
+        cols_exibicao = cols_base + cols_extra_cat + ["descricao", "nome_personalizado"] + (["nome_ceasa"] if mostrar_nome_ceasa else []) + LOJAS_NOMES
         edited_cat = st.data_editor(df_cat_completo[cols_exibicao], use_container_width=True, hide_index=True, column_config=col_cfg_c, num_rows="dynamic", key="catalogo_editor")
 
         html_table = df_cat_completo[cols_exibicao].drop(columns=['codigo'], errors='ignore').fillna('').to_html(index=False, classes="print-table")
@@ -3437,9 +3461,12 @@ def iniciar_tela(setor: str):
                                 prod_changes["descricao"] = str(changes["descricao"])
                             if "fornecedor" in changes: 
                                 prod_changes["fornecedor"] = str(changes["fornecedor"])
-                            if "nome_personalizado" in changes: 
+                            if "nome_personalizado" in changes:
                                 val_np = changes["nome_personalizado"]
                                 prod_changes["nome_personalizado"] = str(val_np).strip() if pd.notna(val_np) and str(val_np).strip() != "" else None
+                            if "nome_ceasa" in changes:
+                                val_nc = changes["nome_ceasa"]
+                                prod_changes["nome_ceasa"] = str(val_nc).strip() if pd.notna(val_nc) and str(val_nc).strip() != "" else None
                             if "codigo_erp" in changes:
                                 try: prod_changes["codigo_erp"] = int(changes["codigo_erp"])
                                 except: pass
@@ -3496,6 +3523,7 @@ def iniciar_tela(setor: str):
                             desc_add = "Novo Produto"
 
                         np_add = str(row.get("nome_personalizado", "")).strip() if pd.notna(row.get("nome_personalizado")) and str(row.get("nome_personalizado")).strip() != "" else None
+                        nc_add = str(row.get("nome_ceasa", "")).strip() if pd.notna(row.get("nome_ceasa")) and str(row.get("nome_ceasa")).strip() != "" else None
                         ice_add = None
                         if usa_iceasa:
                             v_ice = row.get("codigo_iceasa")
@@ -3524,8 +3552,8 @@ def iniciar_tela(setor: str):
                         novo_prod = {
                             "codigo": cod_final, "codigo_erp": cod_erp_digitado,
                             "codigo_iceasa": ice_add,
-                            "descricao": desc_add, "fornecedor": forn_add, 
-                            "nome_personalizado": np_add, "setor": setor, "ativo": True
+                            "descricao": desc_add, "fornecedor": forn_add,
+                            "nome_personalizado": np_add, "nome_ceasa": nc_add, "setor": setor, "ativo": True
                         }
                         for c_extra in cols_extra_cat:
                             v_extra = row.get(c_extra)
