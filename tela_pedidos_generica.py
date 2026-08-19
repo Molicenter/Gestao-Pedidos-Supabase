@@ -1778,12 +1778,29 @@ def modal_sincronizar_espelho(setor_mestre: str, setor_destino: str):
                     st.error(f"⚠️ Erro na sincronização: {e}")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 🥬 NOME DE EXIBIÇÃO — Regra padrão x exceção do usuário Ceasa
+# Padrão: Nome Manual (nome_personalizado) tem prioridade sobre o Nome Prime
+# (descricao vinda do ERP/Iceasa); se não houver Nome Manual, cai no Nome Prime.
+# Exceção: para o usuário "Ceasa", nos setores FLV Normal e FLV Ofertas, o
+# Nome Prime tem prioridade — é o nome usado para comprar no CEASA/atacado.
+# Essa mesma coluna "descricao" alimenta tela, impressão e exportação em todas
+# as visões, então ajustar aqui basta para cobrir os três pedidos.
+# ─────────────────────────────────────────────────────────────────────────────
+def aplicar_nome_exibicao(df_prod, setor, usuario_atual):
+    if usuario_atual == "Ceasa" and setor in ("FLV Normal", "FLV Ofertas"):
+        return df_prod
+    df_prod['descricao'] = df_prod['nome_personalizado'].apply(
+        lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None
+    ).fillna(df_prod['descricao'])
+    return df_prod
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 🧠 FUNÇÃO DIRETORA DO MÓDULO UNIFICADO
 # ─────────────────────────────────────────────────────────────────────────────
 def iniciar_tela(setor: str):
     supabase = obter_supabase()
     usuario_atual = st.session_state.get('usuario_logado', 'Loja 01')
-    acesso_total = (usuario_atual == "Administrador")
+    acesso_total = (usuario_atual in ("Administrador", "Ceasa"))
 
     st.markdown("""
         <style>
@@ -2141,7 +2158,7 @@ def iniciar_tela(setor: str):
 
         codigos_setor = df_prod['codigo'].tolist()
         df_perm_all = buscar_permissoes_setor(supabase, codigos_setor)
-        df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
+        df_prod = aplicar_nome_exibicao(df_prod, setor, usuario_atual)
 
         # Lojas que declararam "Sem Pedido Hoje" (Açougue Adriano / Especiais) → ficam verdes
         lojas_sem_pedido = carregar_sem_pedido(setor, str(data_brasilia())) if setor_usa_sem_pedido(setor) else set()
@@ -2525,7 +2542,7 @@ def iniciar_tela(setor: str):
         usa_obs = setor_usa_obs_loja(setor)
         obs_atual = carregar_obs_loja(setor, num_loja) if usa_obs else ""
 
-        df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
+        df_prod = aplicar_nome_exibicao(df_prod, setor, usuario_atual)
 
         df_loja = pd.merge(df_prod, df_perm, left_on='codigo', right_on='codigo_produto', how='left')
         if 'disponivel' not in df_loja.columns: 
@@ -2885,7 +2902,7 @@ def iniciar_tela(setor: str):
 
         codigos_setor = df_prod['codigo'].tolist()
         df_perm_all = buscar_permissoes_setor(supabase, codigos_setor)
-        df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
+        df_prod = aplicar_nome_exibicao(df_prod, setor, usuario_atual)
 
         if not df_ped.empty:
             if texto_setor:
@@ -3094,7 +3111,7 @@ def iniciar_tela(setor: str):
             return
         if 'codigo_iceasa' not in df_prod.columns:
             df_prod['codigo_iceasa'] = None
-        df_prod['descricao'] = df_prod['nome_personalizado'].apply(lambda x: str(x).strip() if pd.notna(x) and str(x).strip() != "" else None).fillna(df_prod['descricao'])
+        df_prod = aplicar_nome_exibicao(df_prod, setor, usuario_atual)
 
         # Pedidos pendentes → quantidade por loja e total por produto
         # 📌 Persistente: SEM filtro de data — usa o que estiver lançado
