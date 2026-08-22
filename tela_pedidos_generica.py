@@ -2700,12 +2700,21 @@ def iniciar_tela(setor: str):
         # use_container_width=False: as colunas respeitam a largura definida e não
         # "esticam" para preencher a tela (igual à Visão Fornecedores). Fica bem mais
         # compacto — importante porque as lojas também acessam pelo celular.
-        # A chave inclui o filtro: ao trocar de fornecedor o editor reinicia limpo,
-        # evitando que um valor digitado "escorregue" para a linha de outro produto.
-        # Linha mais alta só quando há miniatura, senão a imagem fica espremida
-        # na altura padrão (~35px) e a loja não consegue enxergar o produto.
+        # A chave inclui o filtro E a busca: ao trocar de fornecedor OU de texto
+        # buscado o editor reinicia limpo, evitando que um valor digitado
+        # "escorregue" para a linha de outro produto. 🐛 CORREÇÃO (ago/2026): a
+        # busca por texto só entrou na chave agora — antes, digitar no campo
+        # "🔍 Buscar Produto" mudava a lista de linhas (df_filtrado) SEM trocar a
+        # chave do data_editor, então o Streamlit reaproveitava o estado interno
+        # (edited_rows, indexado por POSIÇÃO) da lista anterior. Resultado: ao
+        # digitar a quantidade de um produto com a busca ativa, o autosave podia
+        # gravar no código de OUTRA linha (a que estava naquela posição antes da
+        # busca) — o produto certo ficava com o campo vazio/zerado mesmo depois
+        # do "Salvar Pedido" confirmar com sucesso. Mesma causa-raiz do bug já
+        # corrigido aqui para o filtro de Fornecedor, só que a busca ficou de fora.
         altura_linha = 90 if (usa_foto and foto_como_miniatura(setor)) else None
-        _chave_grid = f"grid_loja_{num_loja}_{filtro_forn}"
+        _busca_chave = texto_busca.strip().lower() if texto_busca else ""
+        _chave_grid = f"grid_loja_{num_loja}_{filtro_forn}_{_busca_chave}"
 
         # 📏 Altura fixa do grid: com ela a rolagem acontece DENTRO da tabela e não
         # na página inteira — a loja "não sai do lugar" ao digitar. A conta é
