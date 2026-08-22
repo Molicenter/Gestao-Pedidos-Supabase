@@ -2558,14 +2558,28 @@ def iniciar_tela(setor: str):
         df_prod = aplicar_nome_exibicao(df_prod, setor, usuario_atual)
 
         df_loja = pd.merge(df_prod, df_perm, left_on='codigo', right_on='codigo_produto', how='left')
-        if 'disponivel' not in df_loja.columns: 
+        if 'disponivel' not in df_loja.columns:
             df_loja['disponivel'] = True
-        else: 
+        else:
             df_loja['disponivel'] = df_loja['disponivel'].fillna(True)
-            
+
         df_loja = df_loja[df_loja['disponivel'] == True]
 
-        if df_loja.empty: 
+        # 🐛 CORREÇÃO (ago/2026): a coluna 'codigo_produto' agora em df_loja veio do
+        # LEFT JOIN com df_perm (permissões) — só existe pra produto que tem um
+        # registro EXPLÍCITO de permissão pra ESTA loja em pedidos_produtos_lojas.
+        # Produto nunca restringido pra esta loja (o caso mais comum) não tem essa
+        # linha, então 'codigo_produto' ficava NaN. Os merges seguintes (médias e,
+        # principalmente, o pedido já digitado em pedidos_lancamentos) usavam essa
+        # coluna como chave — pra esses produtos o merge NUNCA casava, mesmo com o
+        # valor certinho salvo no banco. Resultado: a loja digitava, salvava com
+        # sucesso, mas ao reabrir a tela o campo aparecia vazio (ex.: cód 571067).
+        # Reconstrói 'codigo_produto' a partir de 'codigo' (a PK do catálogo, que
+        # SEMPRE existe) para que os merges seguintes usem uma chave confiável.
+        df_loja = df_loja.drop(columns=['codigo_produto'], errors='ignore')
+        df_loja['codigo_produto'] = df_loja['codigo']
+
+        if df_loja.empty:
             st.warning("Nenhum produto liberado para esta loja neste setor.")
             return
 
