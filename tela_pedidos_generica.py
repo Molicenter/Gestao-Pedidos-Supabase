@@ -2130,6 +2130,29 @@ def iniciar_tela(setor: str):
             </style>
         """, unsafe_allow_html=True)
 
+    # 🔢 NUMERAÇÃO DE PÁGINA NA IMPRESSÃO — Embalagens/Padaria/Confeitaria saem em
+    # várias folhas (muitos fornecedores/lojas). Isso é desenhado pelo PRÓPRIO
+    # Chrome via CSS (@page/@bottom-right), então funciona sempre — mesmo que a
+    # opção "Cabeçalhos e rodapés" do diálogo de impressão esteja desligada no
+    # computador de quem imprime (é essa opção do navegador, não algo do sistema,
+    # que fazia a numeração aparecer só às vezes). Só Firefox/Safari ainda não
+    # suportam esse recurso do CSS — em Chrome/Edge atualizados funciona liso.
+    if setor_usa_obs_loja(setor):
+        st.markdown("""
+            <style>
+            @media print {
+                @page {
+                    margin: 10mm 10mm 14mm 10mm;
+                    @bottom-right {
+                        content: "Página " counter(page) " de " counter(pages);
+                        font-size: 7.5pt;
+                        color: #333333;
+                    }
+                }
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
     if acesso_total:
         with st.sidebar:
             st.markdown("---")
