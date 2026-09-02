@@ -66,6 +66,32 @@ def data_hora_brasilia() -> str:
     agora = datetime.now(timezone.utc) - timedelta(hours=3)
     return agora.strftime("%d/%m/%Y %H:%M")
 
+def agora_brasilia_iso() -> str:
+    # Data/hora completa (com segundos), no fuso de Brasília, em formato ISO —
+    # usada só para carimbar QUANDO uma ação aconteceu (tabela pedidos_logs).
+    return (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%S")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🕓 LOG DE PEDIDOS (auditoria) — responde "que horas a loja digitou o pedido?".
+# Grava só as CONFIRMAÇÕES (clique em "Salvar Pedido", "Sem Pedido Hoje" e os
+# salvamentos que o Administrador faz por uma loja) — não cada tecla do autosave,
+# senão a tabela cresceria demais sem necessidade. Ver rota "Log de Pedidos".
+# Falha ao gravar o log NUNCA pode travar o salvamento do pedido em si.
+# ─────────────────────────────────────────────────────────────────────────────
+def registrar_log_pedido(setor: str, loja: int, usuario: str, acao: str, origem: str, qtd_itens: int = 0):
+    try:
+        obter_supabase().table("pedidos_logs").insert({
+            "criado_em": agora_brasilia_iso(),
+            "setor": setor,
+            "loja": int(loja),
+            "usuario": usuario,
+            "acao": acao,
+            "origem": origem,
+            "qtd_itens": int(qtd_itens or 0),
+        }).execute()
+    except Exception:
+        pass  # log é best-effort — nunca deve derrubar o fluxo de salvar o pedido
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🔢 ORDEM CUSTOMIZADA DE FORNECEDORES (por setor) — fonte única da verdade.
 # A ordem fica na tabela Supabase `ordem_fornecedores` (setor, fornecedor, ordem)
@@ -1591,6 +1617,8 @@ def modal_sem_pedido(setor: str, num_loja: int, loja_selecionada: str):
                 supabase.table("pedidos_lancamentos").delete().eq("setor", setor).eq("loja", num_loja).execute()
                 # registra a declaração p/ a loja ficar VERDE ("Sem Pedido") na Separação
                 registrar_sem_pedido(setor, num_loja, str(data_brasilia()), st.session_state.get('usuario_logado', loja_selecionada))
+                # 🕓 Log: registra a HORA em que a loja avisou que não fará pedido hoje.
+                registrar_log_pedido(setor, num_loja, st.session_state.get('usuario_logado', loja_selecionada), "sem_pedido_hoje", "Visão das Lojas", 0)
                 msg_aviso = (
                     f"🚨 AVISO - {setor}\n"
                     f"A {loja_selecionada} informou que NÃO fará pedido hoje "
@@ -2066,6 +2094,7 @@ def iniciar_tela(setor: str):
                     "Visão Fornecedores (Resumo)",
                     "Visão das Lojas",
                     "Catálogo de Produtos",
+                    "Log de Pedidos",
                 ]
             else:
                 opcoes_nav = [
@@ -2073,6 +2102,7 @@ def iniciar_tela(setor: str):
                     "Separação e Fechamento",
                     "Visão das Lojas",
                     "Catálogo de Produtos",
+                    "Log de Pedidos",
                 ]
             perfil_navegacao = st.radio("📍 Navegação Interna:", opcoes_nav)
         else:
@@ -2462,8 +2492,10 @@ def iniciar_tela(setor: str):
                                 if q > 0: 
                                     lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                         
-                        if lista_ins: 
+                        if lista_ins:
                             supabase.table("pedidos_lancamentos").insert(lista_ins).execute()
+                            # 🕓 Log: o Administrador editou/salvou o pedido desta loja por aqui.
+                            registrar_log_pedido(setor, n_loja, usuario_atual, "salvar_admin", "Separação e Fechamento", len(lista_ins))
 
                     # 💲 Preço/Observação: FLV grava Preço+Obs; Matéria Prima grava só Obs.
                     if usa_iceasa or eh_mp:
@@ -2869,10 +2901,11 @@ def iniciar_tela(setor: str):
         if btn_salvar_loja:
             with st.spinner("Gravando pedido..."):
                 cods_tela = grid_editado["codigo"].tolist()
+                qtd_itens_log = 0
                 if cods_tela:
                     # 📌 Persistente: apaga o pendente destes produtos (qualquer data) antes de regravar
                     supabase.table("pedidos_lancamentos").delete().eq("setor", setor).eq("loja", num_loja).in_("codigo_produto", cods_tela).execute()
-                    
+
                     lista_ins = []
                     for _, r in grid_editado.iterrows():
                         if usa_texto:
@@ -2881,11 +2914,12 @@ def iniciar_tela(setor: str):
                                 lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": 0, "quantidade_texto": val_txt, "usuario": usuario_atual, "confirmado": True})
                         else:
                             q = converter_para_int_seguro(r["Qtde Pedida"])
-                            if q > 0: 
+                            if q > 0:
                                 lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": num_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual, "confirmado": True})
-                    
-                    if lista_ins: 
+
+                    if lista_ins:
                         supabase.table("pedidos_lancamentos").insert(lista_ins).execute()
+                        qtd_itens_log = len(lista_ins)
                         # se a loja tinha declarado "sem pedido" e agora lançou itens, tira a marca
                         if usa_sem_pedido:
                             remover_sem_pedido(setor, num_loja, str(data_brasilia()))
@@ -2894,6 +2928,10 @@ def iniciar_tela(setor: str):
                 # gravou sob outro filtro de fornecedor, que o bloco acima não
                 # regrava (ele só enxerga os códigos da tela atual).
                 supabase.table("pedidos_lancamentos").update({"confirmado": True}).eq("setor", setor).eq("loja", num_loja).execute()
+
+                # 🕓 Log: registra a HORA em que a loja confirmou o pedido (não cada tecla
+                # do autosave — só este clique em "Salvar Pedido"). Ver "Log de Pedidos".
+                registrar_log_pedido(setor, num_loja, usuario_atual, "salvar_pedido", "Visão das Lojas", qtd_itens_log)
 
                 # 📝 grava a Observação Geral da Loja (embalagem/padaria/confeitaria)
                 if usa_obs:
@@ -3113,8 +3151,10 @@ def iniciar_tela(setor: str):
                                     if q > 0: 
                                         lista_ins.append({"data_pedido": str(data_brasilia()), "setor": setor, "loja": n_loja, "codigo_produto": int(r["codigo"]), "quantidade": q, "usuario": usuario_atual})
                             
-                            if lista_ins: 
+                            if lista_ins:
                                 supabase.table("pedidos_lancamentos").insert(lista_ins).execute()
+                                # 🕓 Log: o Administrador editou/salvou o pedido desta loja por aqui.
+                                registrar_log_pedido(setor, n_loja, usuario_atual, "salvar_admin", "Visão Fornecedores (Resumo)", len(lista_ins))
 
                         # 📝 Observação por produto (só Matéria Prima) → separacao_extras
                         if eh_mp:
@@ -3677,3 +3717,67 @@ def iniciar_tela(setor: str):
                 except Exception as e:
                     if "No database configured" in str(e) or "missing" in str(e).lower(): st.error("⚠️ Aviso: Credenciais do PostgreSQL não configuradas ou inacessíveis.")
                     else: st.error(f"⚠️ Erro ao buscar nomes no banco ERP: {e}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ROTA — LOG DE PEDIDOS (auditoria, só Administrador/Ceasa)
+    # Responde "que horas essa loja digitou o pedido?": mostra cada confirmação
+    # ("Salvar Pedido", "Sem Pedido Hoje" e os salvamentos feitos pelo Admin em
+    # nome de uma loja), com data/hora, loja, usuário e de onde veio a ação.
+    # Não lista cada tecla do autosave — só os cliques de confirmação (ver
+    # registrar_log_pedido lá em cima).
+    # ─────────────────────────────────────────────────────────────────────────
+    elif perfil_navegacao == "Log de Pedidos":
+        st.markdown(f"<div class='no-print'><h2>🕓 Log de Pedidos — {setor}</h2></div>", unsafe_allow_html=True)
+        st.caption(
+            "Registra quando cada loja confirmou o pedido (clique em 💾 Salvar Pedido ou 🚫 Sem Pedido Hoje), "
+            "e quando o Administrador salvou por uma loja na Separação/Resumo por Fornecedor. "
+            "Não mostra cada tecla digitada durante a autogravação — só as confirmações."
+        )
+
+        col_f1, col_f2, col_f3 = st.columns([1.4, 1.2, 1.2])
+        with col_f1:
+            filtro_loja_log = st.selectbox("🏬 Loja:", ["Todas"] + LOJAS_NOMES, key=f"log_filtro_loja_{setor}")
+        with col_f2:
+            data_ini_log = st.date_input("De:", value=data_brasilia() - timedelta(days=7), key=f"log_data_ini_{setor}")
+        with col_f3:
+            data_fim_log = st.date_input("Até:", value=data_brasilia(), key=f"log_data_fim_{setor}")
+
+        if data_ini_log > data_fim_log:
+            st.warning("⚠️ A data inicial é depois da data final — ajuste o período.")
+        else:
+            try:
+                query_log = (
+                    supabase.table("pedidos_logs")
+                    .select("*")
+                    .eq("setor", setor)
+                    .gte("criado_em", f"{data_ini_log}T00:00:00")
+                    .lte("criado_em", f"{data_fim_log}T23:59:59")
+                )
+                if filtro_loja_log != "Todas":
+                    query_log = query_log.eq("loja", int(filtro_loja_log.split()[-1]))
+                resp_log = query_log.order("criado_em", desc=True).limit(1000).execute()
+                df_log = pd.DataFrame(resp_log.data)
+            except Exception as e:
+                df_log = pd.DataFrame()
+                st.error(
+                    "⚠️ Não consegui ler a tabela `pedidos_logs`. Se ela ainda não existe no Supabase, "
+                    f"crie-a antes de usar esta tela. Detalhe: {e}"
+                )
+
+            if df_log.empty:
+                st.info("Nenhum registro encontrado para o período/filtro selecionado.")
+            else:
+                rotulo_acao = {
+                    "salvar_pedido": "💾 Pedido salvo (loja)",
+                    "sem_pedido_hoje": "🚫 Sem Pedido Hoje",
+                    "salvar_admin": "🛠️ Salvo pelo Administrador",
+                }
+                df_log["Quando"] = pd.to_datetime(df_log["criado_em"]).dt.strftime("%d/%m/%Y %H:%M:%S")
+                df_log["Loja"] = df_log["loja"].apply(lambda x: f"Loja {int(x):02d}")
+                df_log["Ação"] = df_log["acao"].map(rotulo_acao).fillna(df_log["acao"])
+                df_log = df_log.rename(columns={"usuario": "Usuário", "origem": "Origem", "qtd_itens": "Itens"})
+                st.dataframe(
+                    df_log[["Quando", "Loja", "Ação", "Usuário", "Origem", "Itens"]],
+                    hide_index=True, use_container_width=True,
+                )
+                st.caption(f"{len(df_log)} registro(s) no período.")
