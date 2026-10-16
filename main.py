@@ -358,15 +358,23 @@ if st.session_state['usuario_logado'] is None:
             st.write("<br>", unsafe_allow_html=True)
 
             if st.button("Entrar no Sistema", type="primary", use_container_width=True):
+                # 🔐 Senhas lidas dos Secrets do Streamlit Cloud (o repositório é público:
+                # nunca escrever senha aqui no código). No Secrets, estas 3 linhas ficam
+                # no TOPO, antes de qualquer [seção], senão o TOML as joga dentro dela.
+                senha_admin = st.secrets.get("SENHA_ADMIN")
+                senha_ceasa = st.secrets.get("SENHA_CEASA")
+                senha_lojas = st.secrets.get("SENHA_LOJAS")
                 if usuario_selecionado == "Selecione...":
                     st.error("⚠️ Por favor, selecione um usuário.")
-                elif usuario_selecionado == "Administrador" and senha_digitada == "moli0000":
+                elif not (senha_admin and senha_ceasa and senha_lojas):
+                    st.error("⚠️ Senhas não configuradas: inclua SENHA_ADMIN, SENHA_CEASA e SENHA_LOJAS no topo dos Secrets do app.")
+                elif usuario_selecionado == "Administrador" and senha_digitada == senha_admin:
                     st.session_state['usuario_logado'] = usuario_selecionado
                     st.rerun()
-                elif usuario_selecionado == "Ceasa" and senha_digitada == "moli0000":
+                elif usuario_selecionado == "Ceasa" and senha_digitada == senha_ceasa:
                     st.session_state['usuario_logado'] = usuario_selecionado
                     st.rerun()
-                elif usuario_selecionado in LOJAS_LOGIN and senha_digitada == "moli1234":
+                elif usuario_selecionado in LOJAS_LOGIN and senha_digitada == senha_lojas:
                     st.session_state['usuario_logado'] = usuario_selecionado
                     st.rerun()
                 elif senha_digitada:
