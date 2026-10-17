@@ -516,3 +516,17 @@ details.alerta-curva table { width: auto; min-width: 60%; }
 .grade .foto-cel { text-align: center; width: 56px; }
 .grade .foto-cel img { width: 46px; height: 46px; object-fit: cover; border-radius: 8px; display: block; margin: 0 auto; cursor: zoom-in; background: var(--superficie-2); }
 .grade .foto-cel a { color: var(--azul); font-weight: 700; font-size: .8rem; }
+
+/* menu da esquerda retrátil (só no computador; no celular ele já vira a faixa de cima) */
+.btn-menu { display: none; border: 0; background: var(--azul-claro); color: var(--azul); width: 40px; height: 40px; border-radius: 12px; flex: none; place-items: center; }
+.btn-menu svg { width: 22px; height: 22px; }
+.btn-menu:hover { filter: brightness(.96); }
+@media (min-width: 901px) {
+  .btn-menu { display: grid; }
+  .app { transition: grid-template-columns .2s ease; }
+  .menu-fechado .app { grid-template-columns: 0 minmax(0, 1fr); }
+  .menu-fechado .lateral { visibility: hidden; padding-left: 0; padding-right: 0; overflow: hidden; }
+  .menu-fechado .barra-total { left: 0; }
+}
+.conteudo { max-width: 1680px; }
+.menu-fechado .conteudo { max-width: none; }

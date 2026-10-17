@@ -832,6 +832,12 @@ function aplicarTema(t) {
 $("#btn-tema").addEventListener("click", () => aplicarTema(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 $("#txt-tema").textContent = document.documentElement.dataset.theme === "dark" ? "Claro" : "Escuro";
 
+// ---------- menu da esquerda: mostrar/esconder ----------
+$("#btn-menu").addEventListener("click", () => {
+  const fechado = document.documentElement.classList.toggle("menu-fechado");
+  try { localStorage.setItem("pedidos_web_menu", fechado ? "fechado" : "aberto"); } catch {}
+});
+
 // ---------- início ----------
 // espera o central.js carregar (as telas da central ficam nele)
 document.addEventListener("DOMContentLoaded", () => {
