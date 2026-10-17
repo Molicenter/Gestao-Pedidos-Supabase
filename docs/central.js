@@ -601,7 +601,7 @@ function renderLog() {
   const iso = (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
   const sete = new Date(hoje); sete.setDate(sete.getDate() - 7);
   $("#conteudo").innerHTML = `<div class="pagina"><div class="cartao">
-    <p class="dica" style="margin-bottom:14px">Registra quando cada loja confirmou o pedido (Salvar pedido ou Sem pedido hoje) e quando o Administrador salvou por uma loja na Separação ou no Resumo por Fornecedor. Não mostra cada número digitado durante o salvamento automático.</p>
+    <p class="dica" style="margin-bottom:14px">Registra quando cada loja confirmou o pedido (Salvar pedido ou Sem pedido hoje), quando o Administrador salvou por uma loja na Separação ou no Resumo por Fornecedor, e quando alguém usou o Limpar pedidos (pelo app novo). Não mostra cada número digitado durante o salvamento automático.</p>
     <div class="barra-filtros">
       <label class="campo-inline">Loja <select id="log-loja"><option value="">Todas</option>${LOJAS.map((l, i) => `<option value="${i + 1}">${l}</option>`).join("")}</select></label>
       <label class="campo-inline">De <input type="date" id="log-de" value="${iso(sete)}"></label>
@@ -611,14 +611,14 @@ function renderLog() {
   ["#log-loja", "#log-de", "#log-ate"].forEach((s) => $(s).addEventListener("change", carregarLog));
   carregarLog();
 }
-const ROTULO_ACAO = { salvar_pedido: "Pedido salvo (loja)", sem_pedido_hoje: "Sem pedido hoje", salvar_admin: "Salvo pelo Administrador" };
+const ROTULO_ACAO = { salvar_pedido: "Pedido salvo (loja)", sem_pedido_hoje: "Sem pedido hoje", salvar_admin: "Salvo pelo Administrador", limpar_pedidos: "Pedidos limpos" };
 async function carregarLog() {
   const de = $("#log-de").value, ate = $("#log-ate").value, el = $("#log-tabela");
   if (de && ate && de > ate) { el.innerHTML = '<p class="faixa aviso">A data inicial é depois da data final. Ajuste o período.</p>'; return; }
   try {
     const linhas = await rpc("pedidos_web_log", { p_token: sessao.token, p_setor: cSetor.nome, p_loja: $("#log-loja").value ? Number($("#log-loja").value) : null, p_de: de, p_ate: ate });
     el.innerHTML = linhas.length ? `<div class="tabela-wrap"><table class="tabela-simples"><thead><tr><th>Quando</th><th>Loja</th><th>Ação</th><th>Usuário</th><th>Origem</th><th>Itens</th></tr></thead><tbody>
-      ${linhas.map((r) => `<tr><td class="num">${esc(r.quando)}</td><td>${nomeLoja(r.loja)}</td><td><span class="tag ${r.acao === "salvar_admin" ? "novo" : r.acao === "sem_pedido_hoje" ? "sem" : "ok"}">${esc(ROTULO_ACAO[r.acao] || r.acao)}</span></td><td>${esc(r.usuario)}</td><td>${esc(r.origem)}</td><td class="num">${r.itens}</td></tr>`).join("")}</tbody></table></div>
+      ${linhas.map((r) => `<tr><td class="num">${esc(r.quando)}</td><td>${r.loja === 0 ? "Todas as lojas" : nomeLoja(r.loja)}</td><td><span class="tag ${r.acao === "salvar_admin" ? "novo" : r.acao === "sem_pedido_hoje" ? "sem" : r.acao === "limpar_pedidos" ? "alerta" : "ok"}">${esc(ROTULO_ACAO[r.acao] || r.acao)}</span></td><td>${esc(r.usuario)}</td><td>${esc(r.origem)}</td><td class="num">${r.acao === "limpar_pedidos" ? `${r.itens} apagados` : r.itens}</td></tr>`).join("")}</tbody></table></div>
       <p class="dica" style="margin-top:10px">${linhas.length} ${linhas.length === 1 ? "registro" : "registros"} no período.</p>`
       : '<p class="vazio">Nenhum registro encontrado para o período e a loja escolhidos.</p>';
   } catch (err) { el.innerHTML = `<p class="faixa erro">${esc(err.message)}</p>`; }
