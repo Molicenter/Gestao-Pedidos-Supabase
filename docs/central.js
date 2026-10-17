@@ -15,9 +15,10 @@ const ABAS = {
   fornecedores: "Visão Fornecedores",
   loja: "Visão das Lojas",
   log: "Log de Pedidos",
+  catalogo: "Catálogo de Produtos",
 };
 // FLV Normal/Ofertas abrem na Separação; os demais na Visão Fornecedores (igual ao Streamlit)
-const abasDoSetor = (s) => (ehFLV(s.nome) ? ["separacao", "porfornecedor", "fornecedores", "loja", "log"] : ["fornecedores", "separacao", "loja", "log"]);
+const abasDoSetor = (s) => (ehFLV(s.nome) ? ["separacao", "porfornecedor", "fornecedores", "loja", "log", "catalogo"] : ["fornecedores", "separacao", "loja", "log", "catalogo"]);
 
 // 🚚 mapa fixo fornecedor → produtos (por Cód. Iceasa), só para o Pedido por Fornecedor do FLV
 const MAPA_FORNECEDORES_FLV = {
@@ -75,7 +76,7 @@ function extrasSujos() {
     return celulaPreco(a.p) !== celulaPreco(b.p) || String(a.o || "").trim() !== String(b.o || "").trim();
   });
 }
-function centralSujo() { return !!cd && (celulasSujas().length > 0 || extrasSujos().length > 0); }
+function centralSujo() { return (!!cd && (celulasSujas().length > 0 || extrasSujos().length > 0)) || catalogoSujo(); }
 
 // ============================================================
 // Rotas da central
@@ -89,12 +90,15 @@ async function rotaCentral(s, aba) {
   // voltando da Visão das Lojas: recarrega a central (a loja pode ter mudado o pedido)
   if (telaAtual === "setor" && !centralSujo()) cd = null;
   // saindo do setor com ajustes não salvos
-  if (centralSujo() && (!s || s.nome !== cd.setor)) {
-    if (!confirm("Há ajustes não salvos neste setor. Sair sem salvar?")) {
-      history.replaceState(null, "", `#/setor/${slug(cd.setor)}/${abaAtual || ""}`);
+  const setorSujo = cd?.setor || cat?.setor;
+  const saindoDoCatalogo = catalogoSujo() && (aba !== "catalogo" || !s || s.nome !== cat.setor);
+  if ((centralSujo() && (!s || s.nome !== setorSujo)) || saindoDoCatalogo) {
+    if (!confirm("Há alterações não salvas. Sair sem salvar?")) {
+      history.replaceState(null, "", `#/setor/${slug(setorSujo)}/${abaAtual || ""}`);
+      if (cSetor) renderAbas(cSetor, abaAtual);
       return;
     }
-    cd = null;
+    cd = null; cat = null;
   }
   $("#pil-loja").hidden = !(s && aba === "loja");
   if (!s) { $("#abas").hidden = true; return abrirCentral(); }
@@ -201,9 +205,11 @@ async function abrirSetorCentral(s, aba, recarregar = false) {
     fornecedores: "Pedido consolidado por fornecedor, com as lojas e o total.",
     porfornecedor: "Quantidades das lojas e preços da Separação, montados por fornecedor para mandar no WhatsApp.",
     log: "Quando cada loja confirmou o pedido, e quando o Administrador salvou por uma loja.",
+    catalogo: "Produtos do setor, nomes, códigos e em quais lojas cada produto pode ser pedido.",
   }[aba] || "";
   renderNavCentral();
   if (aba === "log") { esconderBarraCentral(); return renderLog(); }
+  if (aba === "catalogo") return abrirCatalogo(s, recarregar);
   if (!cd || cd.setor !== s.nome || recarregar) {
     $("#conteudo").innerHTML = '<div class="vazio">Carregando pedidos das lojas...</div>';
     esconderBarraCentral();
@@ -904,4 +910,253 @@ function excelFornecedores() {
     abaObsLojas(wb);
     return baixar(wb, `Resumo_Fornecedores_${cd.setor}.xlsx`);
   });
+}
+
+
+// ============================================================
+// Catálogo de Produtos (etapa 3)
+// ============================================================
+let cat = null;          // pedidos_web_catalogo
+let catLinhas = [];      // [{ id, c (null = novo), v: {campos}, o: {campos originais}, l: [8], lo: [8], x: excluir }]
+let catFiltro = "Todos";
+let catSeq = 0;
+const CAMPOS_CAT = ["fornecedor", "codigo_erp", "codigo_iceasa", "codigo_barra", "link_foto", "descricao", "nome_personalizado", "nome_ceasa"];
+function catalogoSujo() { return !!cat && catLinhas.some((r) => r.x || (!r.c && !novoVazio(r)) || camposMudados(r).length || lojasMudaram(r)); }
+const strV = (v) => (v === null || v === undefined ? "" : String(v).trim());
+function camposMudados(r) { return r.c ? CAMPOS_CAT.filter((k) => strV(r.v[k]) !== strV(r.o[k])) : []; }
+const lojasMudaram = (r) => r.c && r.l.some((v, i) => v !== r.lo[i]);
+function novoVazio(r) { return !r.c && !strV(r.v.descricao) && !strV(r.v.codigo_erp); }
+
+async function abrirCatalogo(s, recarregar) {
+  telaAtual = "central"; cSetor = s; cR = regras(s.nome);
+  if (!cat || cat.setor !== s.nome || recarregar) {
+    $("#conteudo").innerHTML = '<div class="vazio">Carregando catálogo...</div>';
+    esconderBarraCentral();
+    try {
+      cat = await rpc("pedidos_web_catalogo", { p_token: sessao.token, p_setor: s.nome });
+    } catch (err) {
+      $("#conteudo").innerHTML = `<div class="cartao"><p class="faixa erro">${esc(err.message)}</p></div>`;
+      return;
+    }
+    catFiltro = "Todos";
+    catLinhas = cat.produtos.map((p) => {
+      const v = { fornecedor: p.f, codigo_erp: p.erp ?? "", codigo_iceasa: p.ice ?? "", codigo_barra: p.b, link_foto: p.foto, descricao: p.d, nome_personalizado: p.nm, nome_ceasa: p.nc };
+      return { id: ++catSeq, c: p.c, v, o: { ...v }, l: [...p.l], lo: [...p.l], x: false };
+    });
+  }
+  renderCatalogo();
+}
+function colunasCatalogo() {
+  const c = [{ k: "fornecedor", t: "Fornecedor", w: "fornecedor" }];
+  if (cR.erp) c.push({ k: "codigo_erp", t: "Cód. ERP", w: "cod" });
+  if (ehFLV(cat.setor)) c.push({ k: "codigo_iceasa", t: "Cód. Iceasa", w: "cod" });
+  if (cR.flores) c.push({ k: "codigo_barra", t: "Cód. Barra", w: "barra" });
+  if (cR.foto) c.push({ k: "link_foto", t: "Link Foto", w: "foto" });
+  c.push({ k: "descricao", t: "Nome Prime", w: "nome" }, { k: "nome_personalizado", t: "Nome Manual", w: "nome" });
+  if (cat.nome_ceasa) c.push({ k: "nome_ceasa", t: "Nome Ceasa", w: "nome" });
+  return c;
+}
+function linhasCatalogo() {
+  const q = norm($("#cat-busca")?.value);
+  return catLinhas.filter((r) => !r.c || ((catFiltro === "Todos" || grupoFornecedor(r.v.fornecedor) === catFiltro)
+    && (!q || norm(`${r.v.descricao} ${r.v.nome_personalizado} ${r.v.nome_ceasa} ${r.v.codigo_erp} ${r.v.codigo_iceasa} ${r.v.codigo_barra}`).includes(q))));
+}
+function renderCatalogo() {
+  const grupos = ordenarGruposCat();
+  const nomes = cat.nomes;
+  $("#conteudo").innerHTML = `<div class="pagina">
+    ${cat.espelho ? `<p class="faixa info"><span><b>Catálogo-mestre:</b> tudo o que você salvar aqui é replicado automaticamente no <b>${esc(cat.espelho)}</b> — inclusões, nomes, fornecedor, códigos, exclusões e as marcações de loja. Não precisa repetir lá.</span></p>` : ""}
+    ${cat.mestre ? `<p class="faixa aviso"><span>O cadastro deste setor é comandado pelo <b>${esc(cat.mestre)}</b>. Alterações feitas aqui <b>não sobem</b> para o ${esc(cat.mestre)} e podem ser sobrescritas no próximo salvamento de lá. Para mexer no catálogo do FLV, use o ${esc(cat.mestre)}.</span></p>` : ""}
+    <div class="cartao">
+      <div class="barra-filtros">
+        <button class="btn btn-secundario btn-pequeno" type="button" id="cat-novo">+ Novo produto</button>
+        ${grupos.length > 1 ? `<div class="chips" id="cat-chips"><button type="button" class="sel" data-f="Todos">Todos</button>${grupos.map((g) => `<button type="button" data-f="${esc(g)}">${esc(g)}</button>`).join("")}</div>` : ""}
+        <input class="busca" id="cat-busca" type="search" placeholder="Buscar por nome ou código" autocomplete="off">
+        <span class="metrica" id="cat-metrica"></span>
+      </div>
+      <p class="dica" style="margin:-4px 0 12px">Desmarque a loja que <b>não</b> pode pedir o produto. Clique no nome da loja (L01, L02...) para marcar ou desmarcar todos os produtos da lista de uma vez.
+        ${nomes ? ` Nome Prime atualizado pelo ERP em ${esc(nomes.em)}.` : ""}</p>
+      <div class="tabela-wrap grade-wrap"><table class="grade catalogo" id="cat-grade"></table></div>
+    </div>
+  </div>`;
+  $("#cat-chips")?.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-f]"); if (!b) return;
+    catFiltro = b.dataset.f;
+    $$("#cat-chips button").forEach((x) => x.classList.toggle("sel", x === b));
+    desenharCatalogo();
+  });
+  $("#cat-busca").addEventListener("input", desenharCatalogo);
+  $("#cat-novo").onclick = () => {
+    const forn = catFiltro !== "Todos" ? catFiltro : "";
+    catLinhas.unshift({ id: ++catSeq, c: null, v: { fornecedor: forn, codigo_erp: "", codigo_iceasa: "", codigo_barra: "", link_foto: "", descricao: "", nome_personalizado: "", nome_ceasa: "" }, o: {}, l: Array(8).fill(true), lo: Array(8).fill(true), x: false });
+    desenharCatalogo();
+    $(`#cat-grade tr[data-id="${catSeq}"] input[data-campo="${cR.erp ? "codigo_erp" : "descricao"}"]`)?.focus();
+  };
+  const g = $("#cat-grade");
+  g.addEventListener("input", (e) => {
+    const i = e.target; const r = catLinhas.find((x) => String(x.id) === i.closest("tr")?.dataset.id); if (!r) return;
+    if (i.dataset.campo) {
+      if (["codigo_erp", "codigo_iceasa"].includes(i.dataset.campo)) { const l = i.value.replace(/\D/g, ""); if (l !== i.value) i.value = l; }
+      r.v[i.dataset.campo] = i.value;
+      i.classList.toggle("mudou", !!r.c && strV(i.value) !== strV(r.o[i.dataset.campo]));
+    }
+    resumoCatalogo();
+  });
+  g.addEventListener("change", (e) => {
+    const i = e.target; const r = catLinhas.find((x) => String(x.id) === i.closest("tr")?.dataset.id); if (!r) return;
+    if (i.dataset.loja !== undefined) { r.l[Number(i.dataset.loja)] = i.checked; i.closest("td").classList.toggle("mudou", !!r.c && r.l[i.dataset.loja] !== r.lo[i.dataset.loja]); resumoCatalogo(); }
+  });
+  g.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-excluir]");
+    if (b) {
+      const r = catLinhas.find((x) => String(x.id) === b.dataset.excluir);
+      if (!r.c) catLinhas = catLinhas.filter((x) => x !== r); else r.x = !r.x;
+      desenharCatalogo(); return;
+    }
+    const th = e.target.closest("th[data-todas]");
+    if (th) {
+      const l = Number(th.dataset.todas);
+      const vis = linhasCatalogo().filter((r) => !r.x);
+      const marcar = !vis.every((r) => r.l[l]);
+      vis.forEach((r) => (r.l[l] = marcar));
+      desenharCatalogo();
+    }
+  });
+  g.addEventListener("keydown", (e) => {
+    const i = e.target.closest("input[data-campo]"); if (!i || e.key !== "Enter") return;
+    e.preventDefault();
+    const td = i.closest("td"), idx = [...td.parentElement.children].indexOf(td);
+    const prox = td.parentElement.nextElementSibling?.children[idx]?.querySelector("input");
+    if (prox) { prox.focus(); prox.select(); }
+  });
+  desenharCatalogo();
+  barraCatalogo();
+}
+function ordenarGruposCat() {
+  const mapa = cat.ordem || {};
+  return [...new Set(catLinhas.filter((r) => r.c).map((r) => grupoFornecedor(r.v.fornecedor)).filter((x) => String(x).trim()))]
+    .sort((a, b) => ((mapa[a] ?? 1e6) - (mapa[b] ?? 1e6)) || a.toLowerCase().localeCompare(b.toLowerCase(), "pt-BR"));
+}
+function desenharCatalogo() {
+  const cols = colunasCatalogo();
+  const linhas = linhasCatalogo();
+  $("#cat-grade").innerHTML = `<thead><tr>${cols.map((c) => `<th>${c.t}</th>`).join("")}
+      ${LOJAS.map((l, i) => `<th class="num-col clicavel" data-todas="${i}" title="Marcar/desmarcar ${l} em todos os produtos da lista">L${p2(i + 1)}</th>`).join("")}<th></th></tr></thead>
+    <tbody>${linhas.map((r) => `<tr data-id="${r.id}" class="${r.x ? "excluir" : !r.c ? "novo" : ""}">
+      ${cols.map((c) => {
+        const mudou = r.c && strV(r.v[c.k]) !== strV(r.o[c.k]);
+        const ph = !r.c && c.k === "codigo_erp" ? "obrigatório" : !r.c && c.k === "descricao" ? "nome do produto" : "";
+        return `<td><input class="cat-${c.w} ${mudou ? "mudou" : ""}" data-campo="${c.k}" value="${esc(r.v[c.k])}" ${ph ? `placeholder="${ph}"` : ""} ${["codigo_erp", "codigo_iceasa"].includes(c.k) ? 'inputmode="numeric"' : ""} ${r.x ? "disabled" : ""} autocomplete="off"></td>`;
+      }).join("")}
+      ${r.l.map((v, i) => `<td class="ck ${r.c && v !== r.lo[i] ? "mudou" : ""}"><input type="checkbox" data-loja="${i}" ${v ? "checked" : ""} ${r.x ? "disabled" : ""} aria-label="${nomeLoja(i + 1)}"></td>`).join("")}
+      <td><button class="btn-lixo ${r.x ? "ativo" : ""}" type="button" data-excluir="${r.id}" title="${r.x ? "Desfazer exclusão" : "Excluir produto"}">${r.x ? "desfazer" : "excluir"}</button></td>
+    </tr>`).join("") || `<tr><td colspan="${cols.length + 9}" class="vazio">Nenhum produto com esse filtro.</td></tr>`}</tbody>`;
+  resumoCatalogo();
+}
+function resumoCatalogo() {
+  const m = $("#cat-metrica");
+  if (m) m.innerHTML = `<b class="num">${catLinhas.filter((r) => r.c).length}</b> produtos no setor`;
+  const r = $("#c-resumo"); if (!r) return;
+  const exc = catLinhas.filter((x) => x.x).length, nov = catLinhas.filter((x) => !x.c && !novoVazio(x)).length;
+  const ed = catLinhas.filter((x) => x.c && !x.x && (camposMudados(x).length || lojasMudaram(x))).length;
+  const partes = [ed && `${ed} ${ed === 1 ? "alterado" : "alterados"}`, nov && `${nov} ${nov === 1 ? "novo" : "novos"}`, exc && `${exc} para excluir`].filter(Boolean);
+  r.innerHTML = partes.length
+    ? `<strong style="color:var(--laranja)">${partes.join(" · ")}</strong><small>Clique em Salvar catálogo para gravar${cat.espelho ? " (e replicar no " + esc(cat.espelho) + ")" : ""}.</small>`
+    : "<strong>Catálogo salvo</strong><small>Nenhuma alteração pendente.</small>";
+}
+function barraCatalogo() {
+  const b = $("#barra-total");
+  b.hidden = false; document.body.classList.add("com-barra");
+  b.innerHTML = `<div class="resumo" id="c-resumo"></div>
+    <button class="btn btn-secundario" type="button" id="cat-ordem">Ordenar fornecedores</button>
+    ${cR.erp ? '<button class="btn btn-secundario" type="button" id="cat-nomes">Puxar nomes do ERP</button>' : ""}
+    ${cat.espelho ? `<button class="btn btn-secundario" type="button" id="cat-espelho">Sincronizar ${esc(cat.espelho)}</button>` : ""}
+    <button class="btn btn-secundario" type="button" id="cat-imprimir">Imprimir</button>
+    <button class="btn btn-primario" type="button" id="cat-salvar">Salvar catálogo</button>`;
+  $("#cat-salvar").onclick = salvarCatalogo;
+  $("#cat-ordem").onclick = janelaOrdem;
+  $("#cat-nomes")?.addEventListener("click", pedirNomes);
+  $("#cat-espelho")?.addEventListener("click", janelaEspelho);
+  $("#cat-imprimir").onclick = imprimirCatalogo;
+  resumoCatalogo();
+}
+async function salvarCatalogo() {
+  const novos = catLinhas.filter((r) => !r.c && !r.x && !novoVazio(r));
+  const semErp = cR.erp ? novos.filter((r) => !strV(r.v.codigo_erp)) : [];
+  if (semErp.length && !confirm(`${semErp.length} produto(s) novo(s) sem Cód. ERP: vão ganhar um código interno novo e ficam sem estoque/média do ERP${cat.espelho ? " e sem espelho no " + cat.espelho : ""}. Salvar assim mesmo?`)) return;
+  const exc = catLinhas.filter((r) => r.c && r.x);
+  if (exc.length && !confirm(`Excluir ${exc.length} produto(s)? Isso apaga também os pedidos pendentes e as médias deles${cat.espelho ? ", e o mesmo produto no " + cat.espelho : ""}. Não pode ser desfeito.`)) return;
+  const dados = {
+    excluir: exc.map((r) => r.c),
+    editar: catLinhas.filter((r) => r.c && !r.x && camposMudados(r).length).map((r) => ({ c: r.c, campos: Object.fromEntries(camposMudados(r).map((k) => [k, strV(r.v[k])])) })),
+    novos: novos.map((r) => ({ campos: Object.fromEntries(CAMPOS_CAT.map((k) => [k, strV(r.v[k])])), l: r.l })),
+    lojas: catLinhas.filter((r) => r.c && !r.x && lojasMudaram(r)).map((r) => ({ c: r.c, l: r.l })),
+  };
+  if (!dados.excluir.length && !dados.editar.length && !dados.novos.length && !dados.lojas.length) { toast("Nada para salvar."); return; }
+  const btn = $("#cat-salvar");
+  btn.disabled = true; btn.textContent = "Gravando...";
+  try {
+    const r = await rpc("pedidos_web_catalogo_salvar", { p_token: sessao.token, p_setor: cat.setor, p_dados: dados });
+    cd = null; centralPainel = null;
+    await abrirCatalogo(cSetor, true);
+    const esp = r.espelho ? ` Replicado no ${r.espelho}: ${r.esp_novos} incluído(s), ${r.esp_editados} alterado(s), ${r.esp_lojas} com lojas, ${r.esp_excluidos} excluído(s).${r.esp_sem_erp ? ` ${r.esp_sem_erp} sem Cód. ERP não foram espelhados.` : ""}` : "";
+    toast(`Catálogo salvo: ${r.novos} novo(s), ${r.editados} alterado(s), ${r.lojas} com lojas, ${r.excluidos} excluído(s).${esp}`, "ok");
+  } catch (err) {
+    toast(err.message, "erro");
+    btn.disabled = false; btn.textContent = "Salvar catálogo";
+  }
+}
+function janelaOrdem() {
+  // nomes completos dos fornecedores (como no Streamlit): valem para a Visão Fornecedores, o Excel e a impressão
+  const forns = [...new Set(catLinhas.filter((r) => r.c).map((r) => strV(r.v.fornecedor)).filter((x) => x))];
+  const mapa = cat.ordem || {};
+  forns.sort((a, b) => ((mapa[a] ?? 1e6) - (mapa[b] ?? 1e6)) || a.toLowerCase().localeCompare(b.toLowerCase(), "pt-BR"));
+  abrirJanela(`<h3>Ordenar fornecedores</h3>
+    <p>Menor número aparece primeiro. Fornecedor sem número vai para o fim, em ordem alfabética. A ordem vale para a tela, a impressão e o Excel deste setor.</p>
+    <div class="lista-ordem">${forns.map((f) => `<label><span>${esc(f)}</span><input type="number" min="0" step="1" data-f="${esc(f)}" value="${mapa[f] ?? 999}"></label>`).join("")}</div>
+    <div class="acoes"><button class="btn btn-secundario" type="button" data-fechar>Cancelar</button><button class="btn btn-primario" type="button" id="ordem-salvar">Salvar ordem</button></div>`);
+  $("#ordem-salvar").onclick = async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try {
+      const itens = $$(".lista-ordem input").map((i) => ({ f: i.dataset.f, o: i.value }));
+      await rpc("pedidos_web_ordem_salvar", { p_token: sessao.token, p_setor: cat.setor, p_itens: itens });
+      fecharJanela();
+      cat.ordem = Object.fromEntries(itens.map((x) => [x.f, Number(x.o) || 999]));
+      if (cd && cd.setor === cat.setor) cd.ordem = cat.ordem;
+      renderCatalogo();
+      toast("Ordem dos fornecedores salva.", "ok");
+    } catch (err) { b.disabled = false; toast(err.message, "erro"); }
+  };
+}
+async function pedirNomes() {
+  if (!confirm("Atualizar o Nome Prime de todos os produtos pelo cadastro do ERP? A rotina do servidor faz isso em até 30 minutos. O Nome Manual não é alterado.")) return;
+  try {
+    await rpc("pedidos_web_pedir_nomes", { p_token: sessao.token, p_setor: cat.setor });
+    toast("Pedido registrado: o servidor atualiza os nomes na próxima rodada do estoque (até 30 min).", "ok");
+  } catch (err) { toast(err.message, "erro"); }
+}
+function janelaEspelho() {
+  abrirJanela(`<h3>Sincronizar ${esc(cat.espelho)}</h3>
+    <p>Copia o catálogo do <b>${esc(cat.setor)}</b> por cima do <b>${esc(cat.espelho)}</b>: nomes, fornecedor, códigos e marcações de loja. O ${esc(cat.setor)} não é alterado.</p>
+    <p>Use para acertar divergências antigas; no dia a dia o Salvar catálogo já espelha sozinho.</p>
+    <label class="marcar"><input type="checkbox" id="esp-sobras"> Excluir do ${esc(cat.espelho)} os produtos que não existem no ${esc(cat.setor)}</label>
+    <p class="dica">Cuidado: excluir apaga também os pedidos pendentes e as médias desses produtos no ${esc(cat.espelho)}.</p>
+    <div class="acoes"><button class="btn btn-secundario" type="button" data-fechar>Cancelar</button><button class="btn btn-primario" type="button" id="esp-sim">Sincronizar agora</button></div>`);
+  $("#esp-sim").onclick = async (e) => {
+    if (catalogoSujo() && !confirm("Há alterações não salvas no catálogo. Elas não entram na sincronização. Continuar?")) return;
+    const b = e.currentTarget; b.disabled = true; b.textContent = "Alinhando...";
+    try {
+      const r = await rpc("pedidos_web_catalogo_espelhar", { p_token: sessao.token, p_setor: cat.setor, p_excluir_sobras: $("#esp-sobras").checked });
+      fecharJanela();
+      toast(`${r.espelho} sincronizado: ${r.criados} incluído(s), ${r.atualizados} atualizado(s), ${r.removidos} removido(s).${r.sem_erp ? ` ${r.sem_erp} sem Cód. ERP ficaram de fora.` : ""}`, "ok");
+    } catch (err) { b.disabled = false; b.textContent = "Sincronizar agora"; toast(err.message, "erro"); }
+  };
+}
+function imprimirCatalogo() {
+  const cols = colunasCatalogo();
+  const linhas = linhasCatalogo().filter((r) => r.c && !r.x);
+  const cab = [...cols.map((c) => c.t), ...LOJAS];
+  const corpo = linhas.map((r) => [...cols.map((c) => strV(r.v[c.k])), ...r.l.map((v) => (v ? "✓" : "—"))]);
+  imprimirHtml(`<h3>🗂️ Catálogo Geral — ${esc(cat.setor)}</h3><p class="emitido">Emitido em ${dataHoraBR()}</p>
+    ${tabelaPrint(cab, corpo, cols.map((c, i) => (["fornecedor", "descricao", "nome_personalizado", "nome_ceasa", "link_foto"].includes(c.k) ? i : -1)).filter((i) => i >= 0))}`, "landscape", "forn");
 }

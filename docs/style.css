@@ -477,3 +477,26 @@ details.alerta-curva table { width: auto; min-width: 60%; }
   .so-impressao .total-final { text-align: right; font-weight: bold; margin: 2px 0 10px; color: #000; }
   .so-impressao .pre { white-space: pre-wrap; }
 }
+
+/* catálogo */
+.grade.catalogo input[data-campo] { width: 100%; min-width: 70px; font-weight: 600; }
+.grade.catalogo .cat-fornecedor { min-width: 110px; }
+.grade.catalogo .cat-cod { width: 82px; min-width: 82px; }
+.grade.catalogo .cat-barra { width: 130px; min-width: 130px; }
+.grade.catalogo .cat-foto { min-width: 170px; font-weight: 500; font-size: 12px; }
+.grade.catalogo .cat-nome { min-width: 250px; }
+.grade.catalogo td.ck { text-align: center; }
+.grade.catalogo td.ck input { width: 18px; height: 18px; accent-color: var(--verde); cursor: pointer; }
+.grade.catalogo td.ck.mudou { background: var(--laranja-claro); }
+.grade.catalogo th.clicavel { cursor: pointer; user-select: none; }
+.grade.catalogo th.clicavel:hover { color: var(--magenta); }
+.grade.catalogo tr.novo td { background: var(--verde-claro); }
+.grade.catalogo tr.excluir td { background: var(--vermelho-claro); }
+.grade.catalogo tr.excluir input[data-campo] { text-decoration: line-through; }
+.btn-lixo { border: 0; background: none; color: var(--texto-fraco); font-size: .78rem; font-weight: 700; padding: 6px 8px; border-radius: 8px; }
+.btn-lixo:hover { color: var(--vermelho); background: var(--vermelho-claro); }
+.btn-lixo.ativo { color: var(--vermelho); }
+.lista-ordem { display: grid; gap: 6px; max-height: 50vh; overflow-y: auto; }
+.lista-ordem label { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; background: var(--superficie-2); font-weight: 600; }
+.lista-ordem input { width: 80px; min-height: 36px; border: 1.5px solid var(--borda); border-radius: 8px; text-align: center; background: var(--superficie); }
+.janela { max-height: calc(100vh - 32px); overflow-y: auto; }
