@@ -385,3 +385,95 @@ body.com-barra .toast { bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
   .chips { flex-wrap: nowrap; overflow-x: auto; width: 100%; padding-bottom: 4px; }
   .chips button { flex: none; }
 }
+
+/* =================== CENTRAL =================== */
+.abas {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--superficie); border-bottom: 1px solid var(--borda);
+  padding: 0 max(28px, env(safe-area-inset-right, 0px)) 0 max(28px, env(safe-area-inset-left, 0px));
+}
+.abas-lista { display: flex; gap: 4px; overflow-x: auto; flex: 1; }
+.abas-lista a { padding: 12px 14px; font-weight: 700; font-size: .9rem; color: var(--texto-suave); text-decoration: none; border-bottom: 3px solid transparent; white-space: nowrap; }
+.abas-lista a:hover { color: var(--azul); }
+.abas-lista a.ativa { color: var(--azul-escuro); border-bottom-color: var(--magenta); }
+.btn-pequeno { min-height: 34px; padding: 6px 12px; font-size: .82rem; border-radius: 10px; }
+.btn-perigo-forte { background: var(--vermelho); color: #fff; }
+.btn-perigo-forte:hover { filter: brightness(1.08); }
+
+.lojas-mini { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.lojas-mini i, .legenda-lojas i { font-style: normal; font-size: .66rem; font-weight: 800; text-align: center; padding: 4px 0; border-radius: 6px; background: var(--superficie-2); color: var(--texto-fraco); border: 1px solid var(--borda); }
+.lojas-mini i.ok, .legenda-lojas i.ok { background: var(--verde); color: #fff; border-color: var(--verde); }
+.lojas-mini i.sem, .legenda-lojas i.sem { background: var(--verde-claro); color: var(--verde); border-color: color-mix(in srgb, var(--verde) 40%, transparent); }
+.lojas-mini i.rasc, .legenda-lojas i.rasc { background: var(--laranja-claro); color: var(--laranja); border-color: color-mix(in srgb, var(--laranja) 40%, transparent); }
+.legenda-lojas { display: flex; gap: 16px; flex-wrap: wrap; font-size: .8rem; color: var(--texto-suave); margin: 0; }
+.legenda-lojas span { display: inline-flex; align-items: center; gap: 6px; }
+.legenda-lojas i { width: 14px; height: 14px; padding: 0; }
+
+.status-lojas { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
+.st-loja { border-radius: 12px; padding: 10px 6px; text-align: center; display: grid; gap: 2px; border: 1.5px solid transparent; }
+.st-loja b { font-size: .9rem; }
+.st-loja small { font-size: .72rem; font-weight: 700; }
+.st-loja.ok { background: var(--verde-claro); color: var(--verde); border-color: color-mix(in srgb, var(--verde) 30%, transparent); }
+.st-loja.sem { background: var(--verde-claro); color: var(--verde); border-style: dashed; border-color: color-mix(in srgb, var(--verde) 45%, transparent); }
+.st-loja.rasc { background: var(--laranja-claro); color: var(--laranja); }
+.st-loja.falta { background: var(--vermelho-claro); color: var(--vermelho); }
+.metrica { font-size: .88rem; color: var(--texto-suave); font-weight: 600; white-space: nowrap; }
+.metrica b { color: var(--azul-escuro); font-size: 1.05rem; }
+
+details.alerta-curva { display: block; margin: 0 0 14px; }
+details.alerta-curva summary { cursor: pointer; }
+details.alerta-curva table { width: auto; min-width: 60%; }
+
+.grade-wrap { max-height: calc(100vh - 300px); overflow: auto; }
+.grade { font-size: .84rem; }
+.grade th { position: sticky; top: 0; background: var(--superficie); z-index: 1; padding: 8px 6px; }
+.grade td { padding: 3px 6px; }
+.grade th.num-col { text-align: center; }
+.grade .txt-suave { color: var(--texto-suave); font-size: .8rem; white-space: nowrap; }
+.grade .desc { font-weight: 700; min-width: 200px; }
+.grade .total { font-weight: 800; color: var(--azul-escuro); text-align: center; background: var(--superficie-2); }
+.grade .bloq { text-align: center; color: var(--texto-fraco); }
+.grade .alerta-cel { color: var(--vermelho); font-weight: 800; font-size: .74rem; white-space: nowrap; }
+.grade .alerta-cel:not(:empty) { background: var(--vermelho-claro); }
+.grade input { height: 32px; border: 1.5px solid var(--borda); border-radius: 8px; background: var(--superficie); font-weight: 700; font-size: 14px; padding: 0 6px; }
+.grade input:focus { outline: none; border-color: var(--magenta); box-shadow: 0 0 0 3px color-mix(in srgb, var(--magenta) 18%, transparent); }
+.grade .cel-loja input.num { width: 56px; text-align: center; }
+.grade .cel-loja input.texto { width: 86px; }
+.grade input.preco { width: 84px; }
+.grade input.obs { width: 150px; font-weight: 500; }
+.grade input.mudou { border-color: var(--laranja); background: var(--laranja-claro); }
+.grade input.alto { color: var(--vermelho); border-color: var(--vermelho); background: var(--vermelho-claro); }
+.tabela-simples { font-size: .88rem; }
+.tabela-simples td, .tabela-simples th { padding: 8px 10px; }
+.pre { white-space: pre-wrap; }
+.campo-inline { display: inline-flex; align-items: center; gap: 8px; font-size: .85rem; font-weight: 600; color: var(--texto-suave); }
+.campo-inline select, .campo-inline input { min-height: 38px; border: 1.5px solid var(--borda); border-radius: 10px; padding: 6px 10px; background: var(--superficie); }
+
+.pf-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; align-items: start; }
+.pf-card { display: grid; gap: 10px; }
+.pf-nome { font-weight: 800; font-size: 1.02rem; color: var(--azul-escuro); border: 1.5px solid transparent; border-radius: 10px; padding: 6px 8px; background: var(--superficie-2); }
+.pf-nome:focus { outline: none; border-color: var(--azul); }
+.pf-prods { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pf-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--azul-claro); color: var(--azul); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: .78rem; font-weight: 700; }
+.pf-chip button { border: 0; background: rgba(0,0,0,.08); color: inherit; width: 20px; height: 20px; border-radius: 50%; line-height: 1; font-size: .9rem; }
+.pf-mais { border: 1.5px dashed var(--borda); border-radius: 999px; padding: 4px 10px; font-size: .8rem; min-width: 160px; background: var(--superficie); }
+.total-final { text-align: right; font-weight: 800; color: var(--verde); margin: 0; }
+
+@media (max-width: 900px) {
+  .abas { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .status-lojas { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pf-grade { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* impressão da central */
+@media print {
+  .so-impressao h4.forn { font-size: 9.5pt; margin: 8px 0 0; padding: 5px 8px; background: #e0e0e0 !important; border: 1px solid #000; border-bottom: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .so-impressao .bloco { page-break-inside: avoid; margin-bottom: 10px; }
+  .so-impressao .bloco-forn { margin-bottom: 10px; }
+  .so-impressao h4.forn { page-break-after: avoid; }
+  .so-impressao.sep table { font-size: 8pt; }
+  .so-impressao.forn table { font-size: 7pt; }
+  .so-impressao.forn th, .so-impressao.forn td { padding: 2px 4px; line-height: 1.05; }
+  .so-impressao.sep table, .so-impressao.forn table, .so-impressao.pf table { table-layout: auto; }
+  .so-impressao .total-final { text-align: right; font-weight: bold; margin: 2px 0 10px; color: #000; }
+  .so-impressao .pre { white-space: pre-wrap; }
+}

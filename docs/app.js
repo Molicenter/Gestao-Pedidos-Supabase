@@ -147,7 +147,7 @@ async function avisos(action, extra) {
 // ============================================================
 function montarLogin() {
   const sel = $("#login-usuario");
-  sel.innerHTML = '<option value="">Selecione...</option>' + ["Administrador", ...LOJAS].map((u) => `<option>${u}</option>`).join("");
+  sel.innerHTML = '<option value="">Selecione...</option>' + ["Administrador", "Ceasa", ...LOJAS].map((u) => `<option>${u}</option>`).join("");
   try { const u = localStorage.getItem("pedidos_web_ultimo_usuario"); if (u) sel.value = u; } catch {}
   $("#versao-login").textContent = "versão " + CFG.VERSAO;
 }
@@ -195,7 +195,7 @@ let telaAtual = "painel";   // painel | setor
 function iniciarApp() {
   $("#tela-login").hidden = true;
   $("#app").hidden = false;
-  const admin = sessao.perfil === "admin";
+  const admin = sessao.perfil !== "loja";   // Administrador ou Ceasa (central)
   if (admin) {
     let salva = null;
     try { salva = Number(localStorage.getItem("pedidos_web_loja_admin")); } catch {}
@@ -204,7 +204,7 @@ function iniciarApp() {
     lojaAtual = sessao.loja;
   }
   $("#conta-nome").textContent = sessao.usuario;
-  $("#conta-perfil").textContent = admin ? "Administrador · visualizando como loja" : "Pedidos da loja";
+  $("#conta-perfil").textContent = sessao.perfil === "ceasa" ? "Ceasa · central de pedidos" : admin ? "Administrador · central de pedidos" : "Pedidos da loja";
   montarPilulaLoja();
   const d = agoraSP();
   $("#pil-data").textContent = `${DIAS[d.getDay()]}, ${p2(d.getDate())}/${p2(d.getMonth() + 1)}`;
@@ -212,7 +212,7 @@ function iniciarApp() {
 }
 function montarPilulaLoja() {
   const pil = $("#pil-loja");
-  if (sessao.perfil === "admin") {
+  if (sessao.perfil !== "loja") {
     pil.innerHTML = `Ver como <select id="sel-loja" aria-label="Visualizar como">${LOJAS.map((l, i) => `<option value="${i + 1}" ${i + 1 === lojaAtual ? "selected" : ""}>${l}</option>`).join("")}</select>`;
     $("#sel-loja").addEventListener("change", (e) => {
       if (temAlteracaoPendente() && !confirm("Ainda há alterações sendo salvas. Trocar de loja mesmo assim?")) { e.target.value = lojaAtual; return; }
@@ -233,6 +233,7 @@ function situacaoSetor(nome) {
   return { cls: "ok", txt: `Salvo ${st.ultimo || ""} · ${st.itens} ${st.itens === 1 ? "item" : "itens"}`, mini: "ok" };
 }
 function renderNav() {
+  if (ehCentral()) return renderNavCentral();
   const ativo = telaAtual === "setor" ? setorAberto?.nome : null;
   const icPainel = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>';
   $("#nav").innerHTML = `<div class="nav-rotulo">Início</div>
@@ -256,8 +257,10 @@ function irPara(hash) {
 window.addEventListener("hashchange", () => { if (sessao) rota(); });
 
 async function rota() {
-  const m = location.hash.match(/^#\/setor\/([a-z0-9-]+)/);
+  const m = location.hash.match(/^#\/setor\/([a-z0-9-]+)(?:\/([a-z]+))?/);
   const s = m && setorPorSlug(m[1]);
+  if (ehCentral()) { await rotaCentral(s, m && m[2]); window.scrollTo({ top: 0 }); return; }
+  $("#abas").hidden = true; $("#pil-loja").hidden = false;
   if (s) await abrirSetor(s); else await abrirPainel();
   window.scrollTo({ top: 0 });
 }
@@ -343,6 +346,7 @@ let obsOriginal = "";
 let filtroForn = "Todos";
 
 function temAlteracaoPendente() {
+  if (telaAtual === "central") return centralSujo();
   if (telaAtual !== "setor") return false;
   const obsMudou = R?.obs && $("#obs-loja") && $("#obs-loja").value.trim() !== obsOriginal.trim();
   return gravando > 0 || Object.keys(timers).length > 0 || !!falhou || obsMudou;
@@ -709,6 +713,7 @@ function imprimir() {
   const usada = cols.reduce((s, c) => s + (largura[c.k] || 0), 0);
   const linhas = linhasExport();
   const obs = R.obs ? $("#obs-loja").value.trim() : "";
+  $("#impressao").className = "so-impressao";
   $("#impressao").innerHTML = `<h3>📦 Pedido Oficial — ${nomeLoja(lojaAtual)}</h3>
     <p class="emitido">${esc(setorAberto.titulo)} · Emitido em ${dataHoraBR()}</p>
     <table><colgroup>${cols.map((c) => `<col style="width:${c.k === "desc" ? 100 - usada : largura[c.k]}%">`).join("")}</colgroup>
@@ -828,5 +833,8 @@ $("#btn-tema").addEventListener("click", () => aplicarTema(document.documentElem
 $("#txt-tema").textContent = document.documentElement.dataset.theme === "dark" ? "Claro" : "Escuro";
 
 // ---------- início ----------
-if (sessao?.token) iniciarApp();
-else { $("#tela-login").hidden = false; montarLogin(); }
+// espera o central.js carregar (as telas da central ficam nele)
+document.addEventListener("DOMContentLoaded", () => {
+  if (sessao?.token) iniciarApp();
+  else { $("#tela-login").hidden = false; montarLogin(); }
+});
