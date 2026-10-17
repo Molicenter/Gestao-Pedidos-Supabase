@@ -500,3 +500,16 @@ details.alerta-curva table { width: auto; min-width: 60%; }
 .lista-ordem label { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; background: var(--superficie-2); font-weight: 600; }
 .lista-ordem input { width: 80px; min-height: 36px; border: 1.5px solid var(--borda); border-radius: 8px; text-align: center; background: var(--superficie); }
 .janela { max-height: calc(100vh - 32px); overflow-y: auto; }
+
+/* ajustes 1.2.1: valores centralizados, grade mais compacta para caber as 8 lojas */
+.qtd input.texto { text-align: center; padding: 0 6px; }
+.grade { font-size: .8rem; }
+.grade th { padding: 7px 4px; font-size: .68rem; }
+.grade td { padding: 3px 4px; }
+.grade .desc { min-width: 170px; }
+.grade td.cel-loja, .grade td.bloq { text-align: center; }
+.grade .cel-loja input.num, .grade .cel-loja input.texto { width: 100%; min-width: 46px; max-width: 70px; text-align: center; padding: 0 3px; }
+.grade input { height: 30px; font-size: 13px; }
+.grade input.preco { width: 76px; text-align: center; }
+.grade input.obs { width: 130px; }
+.grade .total { min-width: 44px; }

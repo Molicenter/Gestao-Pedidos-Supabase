@@ -423,7 +423,7 @@ function renderSetor() {
       media: `<span class="p-num num">${fmtNum(p.m, 2)}</span>`,
       est: `<span class="p-num num">${fmtNum(Math.trunc(p.e))}</span>`,
       qtd: `<span class="qtd">${R.texto
-        ? `<input class="texto" type="text" data-c="${p.c}" value="${esc(v)}" placeholder="ex.: 2 fd" aria-label="Pedido de ${esc(p.d)}" autocomplete="off">`
+        ? `<input class="texto" type="text" data-c="${p.c}" value="${esc(v)}" aria-label="Pedido de ${esc(p.d)}" autocomplete="off">`
         : `<button type="button" data-passo="-1" data-c="${p.c}" aria-label="Menos">−</button><input class="num" type="text" inputmode="numeric" data-c="${p.c}" value="${esc(v)}" aria-label="Quantidade de ${esc(p.d)}" autocomplete="off"><button type="button" data-passo="1" data-c="${p.c}" aria-label="Mais">+</button>`}</span>`,
     };
     const info = [R.media ? `média ${fmtNum(p.m, 2)}` : "", R.erp ? `estoque ${fmtNum(Math.trunc(p.e))}` : ""].filter(Boolean).join(" · ");
