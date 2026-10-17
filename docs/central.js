@@ -325,6 +325,7 @@ function colunasSeparacao(temAlerta) {
   if (cR.erp) c.push({ k: "erp", t: "Cód. ERP" });
   if (flv) c.push({ k: "ice", t: "Cód. Iceasa" });
   c.push({ k: "desc", t: "Descrição" });
+  if (cR.foto) c.push({ k: "foto", t: "Foto" });
   if (temAlerta) c.push({ k: "alerta", t: "⚠️" });
   for (let l = 1; l <= 8; l++) c.push({ k: "l" + l, t: "L" + p2(l), loja: l });
   if (!cR.texto) c.push({ k: "total", t: "Total" });
@@ -355,6 +356,12 @@ function celulaGrade(p, c, porCod = {}) {
     case "erp": return `<td class="num txt-suave">${esc(p.erp)}</td>`;
     case "ice": return `<td class="num txt-suave">${esc(p.ice ?? "")}</td>`;
     case "desc": return `<td class="desc">${esc(p.d)}</td>`;
+    case "foto": {
+      // Oriental: miniatura (clique amplia) · Flores: link "Ver", igual à tela da loja
+      const url = String(p.foto || "").trim();
+      if (!/^https?:\/\//.test(url)) return '<td class="foto-cel"></td>';
+      return `<td class="foto-cel">${cR.miniatura ? `<img src="${esc(url)}" alt="" loading="lazy" onerror="this.remove()" data-ampliar>` : `<a href="${esc(url)}" target="_blank" rel="noopener">Ver</a>`}</td>`;
+    }
     case "alerta": return `<td class="alerta-cel">${esc((porCod[p.c] || []).join(" "))}</td>`;
     case "total": return `<td class="num total" data-total="${p.c}">${totalLinha(p) || ""}</td>`;
     case "preco": return `<td><input class="ext preco" data-p="${p.c}" value="${esc(cExt[p.c]?.p || "")}" placeholder="R$" autocomplete="off"></td>`;
@@ -470,6 +477,7 @@ function colunasFornecedor(lojas) {
   if (flv) c.push({ k: "ice", t: "Cód. Iceasa" });
   if (cR.flores) c.push({ k: "barra", t: "Cód. Barra" });
   c.push({ k: "desc", t: "Produto" });
+  if (cR.foto) c.push({ k: "foto", t: "Foto" });
   for (const l of lojas) c.push({ k: "l" + l, t: "L" + p2(l), loja: l });
   if (!cR.texto) c.push({ k: "total", t: "Total" });
   if (mp) c.push({ k: "obs", t: "Observação" });
@@ -1160,3 +1168,9 @@ function imprimirCatalogo() {
   imprimirHtml(`<h3>🗂️ Catálogo Geral — ${esc(cat.setor)}</h3><p class="emitido">Emitido em ${dataHoraBR()}</p>
     ${tabelaPrint(cab, corpo, cols.map((c, i) => (["fornecedor", "descricao", "nome_personalizado", "nome_ceasa", "link_foto"].includes(c.k) ? i : -1)).filter((i) => i >= 0))}`, "landscape", "forn");
 }
+
+// clique na miniatura da Separação/Fornecedores amplia a foto
+document.addEventListener("click", (e) => {
+  const img = e.target.closest(".grade img[data-ampliar]");
+  if (img) abrirJanela(`<img class="foto-grande" src="${esc(img.src)}" alt=""><div class="acoes"><button class="btn btn-secundario" type="button" data-fechar>Fechar</button></div>`);
+});

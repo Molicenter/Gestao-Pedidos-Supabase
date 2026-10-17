@@ -513,3 +513,6 @@ details.alerta-curva table { width: auto; min-width: 60%; }
 .grade input.preco { width: 76px; text-align: center; }
 .grade input.obs { width: 130px; }
 .grade .total { min-width: 44px; }
+.grade .foto-cel { text-align: center; width: 56px; }
+.grade .foto-cel img { width: 46px; height: 46px; object-fit: cover; border-radius: 8px; display: block; margin: 0 auto; cursor: zoom-in; background: var(--superficie-2); }
+.grade .foto-cel a { color: var(--azul); font-weight: 700; font-size: .8rem; }
