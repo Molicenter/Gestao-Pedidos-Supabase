@@ -147,8 +147,13 @@ async function avisos(action, extra) {
 // ============================================================
 function montarLogin() {
   const sel = $("#login-usuario");
-  sel.innerHTML = '<option value="">Selecione...</option>' + ["Administrador", "Ceasa", ...LOJAS].map((u) => `<option>${u}</option>`).join("");
-  try { const u = localStorage.getItem("pedidos_web_ultimo_usuario"); if (u) sel.value = u; } catch {}
+  const preencher = (lista) => {
+    sel.innerHTML = '<option value="">Selecione...</option>' + lista.map((u) => `<option>${esc(u)}</option>`).join("");
+    try { const u = localStorage.getItem("pedidos_web_ultimo_usuario"); if (u && lista.includes(u)) sel.value = u; } catch {}
+  };
+  preencher(["Administrador", "Ceasa", ...LOJAS]);
+  // lista vem da tela de Usuários (logins ativos); se o SQL 07 ainda não rodou, fica a lista fixa
+  rpc("pedidos_web_lista_usuarios").then((l) => { if (Array.isArray(l) && l.length) preencher(l); }).catch(() => {});
   $("#versao-login").textContent = "versão " + CFG.VERSAO;
 }
 $("#form-login").addEventListener("submit", async (e) => {
@@ -204,7 +209,8 @@ function iniciarApp() {
     lojaAtual = sessao.loja;
   }
   $("#conta-nome").textContent = sessao.usuario;
-  $("#conta-perfil").textContent = sessao.perfil === "ceasa" ? "Ceasa · central de pedidos" : admin ? "Administrador · central de pedidos" : "Pedidos da loja";
+  const resp = Array.isArray(sessao.setores) && sessao.setores.length;
+  $("#conta-perfil").textContent = sessao.perfil === "ceasa" ? "Ceasa · central de pedidos" : resp ? `Responsável · ${sessao.setores.length} setor${sessao.setores.length > 1 ? "es" : ""}` : admin ? "Administrador · central de pedidos" : "Pedidos da loja";
   montarPilulaLoja();
   const d = agoraSP();
   $("#pil-data").textContent = `${DIAS[d.getDay()]}, ${p2(d.getDate())}/${p2(d.getMonth() + 1)}`;
@@ -250,6 +256,7 @@ document.addEventListener("click", (e) => {
   if (!b || b.closest(".janela")) return;
   if (b.dataset.setor) irPara("#/setor/" + b.dataset.setor);
   else if (b.dataset.ir === "painel") irPara("#/painel");
+  else if (b.dataset.ir === "usuarios") irPara("#/usuarios");
 });
 function irPara(hash) {
   if (location.hash === hash) rota(); else location.hash = hash;
@@ -257,6 +264,7 @@ function irPara(hash) {
 window.addEventListener("hashchange", () => { if (sessao) rota(); });
 
 async function rota() {
+  if (location.hash === "#/usuarios" && adminTotal()) { await abrirUsuarios(); window.scrollTo({ top: 0 }); return; }
   const m = location.hash.match(/^#\/setor\/([a-z0-9-]+)(?:\/([a-z]+))?/);
   const s = m && setorPorSlug(m[1]);
   if (ehCentral()) { await rotaCentral(s, m && m[2]); window.scrollTo({ top: 0 }); return; }

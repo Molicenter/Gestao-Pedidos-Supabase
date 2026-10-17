@@ -7,7 +7,13 @@
 const SETORES_CEASA = ["Folhagem", "FLV Normal", "FLV Ofertas"];
 const FATOR_ALERTA_CENTRAL = 3;       // FATOR_ALERTA_MEDIA do Streamlit
 const ehCentral = () => !!sessao && sessao.perfil !== "loja";
-const setoresVisiveis = () => (sessao?.perfil === "ceasa" ? SETORES.filter((s) => SETORES_CEASA.includes(s.nome)) : SETORES);
+// Ceasa: só FLV/Folhagem · responsável de setor (Administrador com lista de setores): só os setores dele
+const setoresVisiveis = () => {
+  if (sessao?.perfil === "ceasa") return SETORES.filter((s) => SETORES_CEASA.includes(s.nome));
+  if (Array.isArray(sessao?.setores) && sessao.setores.length) return SETORES.filter((s) => sessao.setores.includes(s.nome));
+  return SETORES;
+};
+const adminTotal = () => sessao?.perfil === "admin" && !(Array.isArray(sessao.setores) && sessao.setores.length);
 const ehFLV = (nome) => nome === "FLV Normal" || nome === "FLV Ofertas";   // Cód. Iceasa, preço, BOX, alerta 3x
 const ABAS = {
   separacao: "Separação e Fechamento",
@@ -118,6 +124,7 @@ function renderAbas(s, aba) {
 }
 function renderNavCentral() {
   const ativo = (telaAtual === "setor" ? setorAberto?.nome : telaAtual === "central" && cSetor ? cSetor.nome : null);
+  // (telaAtual "usuarios" = tela de Usuários, só do Administrador)
   const icPainel = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>';
   $("#nav").innerHTML = `<div class="nav-rotulo">Central</div>
     <button type="button" data-ir="painel" class="${telaAtual === "painel" ? "ativo" : ""}">${icPainel}Painel da central</button>
@@ -126,7 +133,9 @@ function renderNavCentral() {
       const n = lojasProntas(s.nome).length;
       const mini = n === 8 ? '<span class="estado-mini ok">8/8</span>' : n ? `<span class="estado-mini rasc">${n}/8</span>` : "";
       return `<button type="button" data-setor="${slug(s.nome)}" class="${ativo === s.nome ? "ativo" : ""}"><span class="bolinha" style="background:var(--g-${s.g})"></span>${esc(s.titulo)}${mini}</button>`;
-    }).join("")}`;
+    }).join("")}
+    ${adminTotal() ? `<div class="nav-rotulo">Administração</div>
+    <button type="button" data-ir="usuarios" class="${telaAtual === "usuarios" ? "ativo" : ""}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3"/></svg>Usuários</button>` : ""}`;
 }
 
 // lojas que já salvaram (confirmado) ou declararam sem pedido hoje
