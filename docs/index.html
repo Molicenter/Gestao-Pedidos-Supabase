@@ -6,6 +6,11 @@
   <meta name="theme-color" content="#0B3D63">
   <title>Gestão de Pedidos · Molicenter</title>
   <link rel="icon" href="logo.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icone-apple-180.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Pedidos">
   <script>
     // tema: claro por padrão; cada computador lembra a escolha
     try { var t = localStorage.getItem("pedidos_web_tema"); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; } catch (e) {}
@@ -98,5 +103,8 @@
   <script src="app.js?v=1.4.0"></script>
   <script src="central.js?v=1.4.0"></script>
   <script src="usuarios.js?v=1.4.0"></script>
+  <script>
+    if ("serviceWorker" in navigator) window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+  </script>
 </body>
 </html>
