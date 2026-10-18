@@ -2,7 +2,6 @@
   "name": "Gestão de Pedidos · Molicenter",
   "short_name": "Pedidos",
   "description": "Pedidos das lojas para o CD",
-  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
