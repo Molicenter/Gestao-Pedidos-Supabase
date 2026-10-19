@@ -17,7 +17,7 @@
     // menu da esquerda recolhido (cada computador lembra)
     try { if (localStorage.getItem("pedidos_web_menu") === "fechado") document.documentElement.classList.add("menu-fechado"); } catch (e) {}
   </script>
-  <link rel="stylesheet" href="style.css?v=1.5.0">
+  <link rel="stylesheet" href="style.css?v=1.6.0">
 </head>
 <body>
   <!-- =================== LOGIN =================== -->
@@ -99,10 +99,10 @@
   <div class="toast" id="toast" role="status" hidden></div>
   <div class="carregando" id="carregando" hidden><div class="spinner"></div></div>
 
-  <script src="config.js?v=1.5.0"></script>
-  <script src="app.js?v=1.5.0"></script>
-  <script src="central.js?v=1.5.0"></script>
-  <script src="usuarios.js?v=1.5.0"></script>
+  <script src="config.js?v=1.6.0"></script>
+  <script src="app.js?v=1.6.0"></script>
+  <script src="central.js?v=1.6.0"></script>
+  <script src="usuarios.js?v=1.6.0"></script>
   <script>
     if ("serviceWorker" in navigator) window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
   </script>

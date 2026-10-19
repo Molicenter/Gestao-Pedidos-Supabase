@@ -22,6 +22,24 @@ async function abrirUsuarios() {
   renderUsuarios();
 }
 
+// "ativo agora / há X min": última vez que o login mexeu no app (qualquer tela, salvamento ou atualização do painel)
+function seloAtivo(u) {
+  if (!u.online) return "";
+  const m = u.visto_min;
+  const dica = "Última atividade no app. O login continua valendo por 18 horas ou até a pessoa clicar em Sair.";
+  if (m === null || m === undefined) return ` <span class="tag sem" title="${dica}">logado</span>`;
+  if (m <= 5) return ` <span class="tag ok" title="${dica}">● ativo agora</span>`;
+  if (m < 60) return ` <span class="tag manual" title="${dica}">ativo há ${m} min</span>`;
+  const h = Math.floor(m / 60);
+  return ` <span class="tag sem" title="${dica}">ativo há ${h}h${m % 60 ? String(m % 60).padStart(2, "0") : ""}</span>`;
+}
+// a tela se atualiza sozinha a cada minuto (se não estiver editando nada)
+setInterval(async () => {
+  if (typeof telaAtual === "undefined" || telaAtual !== "usuarios" || document.hidden || !sessao) return;
+  if (!$("#janela").hidden || $("#form-geral input")?.value || document.activeElement?.closest?.("#conteudo form")) return;
+  try { usuariosPed = await rpc("pedidos_web_usuarios_lista", { p_token: sessao.token }); renderUsuarios(); } catch {}
+}, 60000);
+
 function renderUsuarios() {
   const d = usuariosPed;
   const quando = (v) => (v ? new Date(v).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "") : "—");
@@ -31,7 +49,7 @@ function renderUsuarios() {
       <div class="barra-filtros"><button type="button" class="btn btn-primario" data-us-ped="novo">+ Novo login</button></div>
       <div class="tabela-wrap"><table class="us-ped"><thead><tr><th>Usuário</th><th>Perfil</th><th>Loja / setores</th><th>Situação</th><th>Senha</th><th>Último login</th><th></th></tr></thead><tbody>
       ${d.usuarios.map((u, i) => `<tr class="${u.ativo ? "" : "inativo"}">
-        <td><b>${esc(u.usuario)}</b>${u.usuario === sessao.usuario ? ' <span class="tag ok">você</span>' : ""}${u.online ? ' <span class="tag manual" title="Tem sessão aberta (entrou nas últimas 18 horas e não saiu)">sessão aberta</span>' : ""}</td>
+        <td><b>${esc(u.usuario)}</b>${u.usuario === sessao.usuario ? ' <span class="tag ok">você</span>' : ""}${seloAtivo(u)}</td>
         <td>${esc(rotuloPerfil(u))}</td><td>${u.loja ? esc(nomeLoja(u.loja)) : u.setores?.length ? u.setores.map((s) => `<span class="tag sem">${esc(tituloSetor(s))}</span>`).join(" ") : u.perfil === "ceasa" ? "Folhagem, FLV Normal e Ofertas" : "Todos os setores"}</td>
         <td>${u.ativo ? '<span class="tag ok">Ativo</span>' : '<span class="tag fora">Desativado</span>'}</td>
         <td>${ROTULO_SENHA[u.senha] || ""}</td><td>${esc(quando(u.ultimo_login))}</td>
