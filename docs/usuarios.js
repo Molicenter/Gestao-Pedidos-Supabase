@@ -46,7 +46,7 @@ function renderUsuarios() {
   $("#conteudo").innerHTML = `<div class="pagina">
     <div class="cartao"><h3>Logins<small>${d.usuarios.length} usuários</small></h3>
       <p class="dica" style="margin-bottom:12px">Trocar a senha, o perfil, a loja ou desativar derruba na hora quem estiver logado com aquele usuário. A senha fica guardada só como código (hash), ninguém consegue ver.</p>
-      <div class="barra-filtros"><button type="button" class="btn btn-primario" data-us-ped="novo">+ Novo login</button></div>
+      <div class="barra-filtros"><button type="button" class="btn btn-primario" data-us-ped="novo">+ Novo login</button><button type="button" class="btn btn-secundario" id="us-ordenar">↕ Ordenar logins</button></div>
       <div class="tabela-wrap"><table class="us-ped"><thead><tr><th>Usuário</th><th>Perfil</th><th>Loja / setores</th><th>Situação</th><th>Senha</th><th>Último login</th><th></th></tr></thead><tbody>
       ${d.usuarios.map((u, i) => `<tr class="${u.ativo ? "" : "inativo"}">
         <td><b>${esc(u.usuario)}</b>${u.usuario === sessao.usuario ? ' <span class="tag ok">você</span>' : ""}${seloAtivo(u)}</td>
@@ -62,6 +62,7 @@ function renderUsuarios() {
         <button type="submit" class="btn btn-primario">Trocar senha geral</button>
       </form></div></div>`;
   $$("[data-us-ped]").forEach((b) => (b.onclick = () => formUsuarioPed(b.dataset.usPed === "novo" ? null : d.usuarios[+b.dataset.usPed])));
+  $("#us-ordenar").onclick = ordenarUsuarios;
   $("#form-geral").onsubmit = async (e) => {
     e.preventDefault();
     const v = e.target.senha.value;
@@ -126,3 +127,35 @@ Object.assign(MENSAGENS, {
   SENHA_CURTA: "A senha precisa ter pelo menos 6 caracteres.",
   SENHA_OBRIGATORIA: "Defina uma senha para o login novo (ou marque “usar a senha geral das lojas”).",
 });
+
+// ---------- ordem dos logins: vale pra esta tela e pra lista do login ----------
+function ordenarUsuarios() {
+  const nomes = usuariosPed.usuarios.map((u) => u.usuario);
+  const desenhar = () => {
+    $("#ordem-us").innerHTML = nomes.map((n, i) => `<div class="ordem-us-linha"><span class="num">${i + 1}</span><b>${esc(n)}</b>
+      <button type="button" class="btn btn-secundario btn-peq" data-mover="${i}:-1" ${i === 0 ? "disabled" : ""} aria-label="Subir ${esc(n)}">▲</button>
+      <button type="button" class="btn btn-secundario btn-peq" data-mover="${i}:1" ${i === nomes.length - 1 ? "disabled" : ""} aria-label="Descer ${esc(n)}">▼</button></div>`).join("");
+  };
+  abrirJanela(`<h3>Ordenar logins</h3>
+    <p>Use ▲ e ▼ para mudar a posição. A ordem vale para esta tela e para a lista de usuários na tela de login.</p>
+    <div class="lista-ordem" id="ordem-us"></div>
+    <div class="acoes"><button class="btn btn-secundario" type="button" data-fechar>Cancelar</button><button class="btn btn-primario" type="button" id="ordem-us-salvar">Salvar ordem</button></div>`);
+  desenhar();
+  $("#ordem-us").onclick = (e) => {
+    const b = e.target.closest("[data-mover]"); if (!b) return;
+    const [i, d] = b.dataset.mover.split(":").map(Number), j = i + d;
+    if (j < 0 || j >= nomes.length) return;
+    [nomes[i], nomes[j]] = [nomes[j], nomes[i]];
+    desenhar();
+    $(`#ordem-us [data-mover="${j}:${d}"]`)?.focus() || $(`#ordem-us [data-mover="${j}:${-d}"]`)?.focus();
+  };
+  $("#ordem-us-salvar").onclick = async (e) => {
+    const b = e.currentTarget; b.disabled = true; b.textContent = "Salvando...";
+    try {
+      await rpc("pedidos_web_usuarios_ordem", { p_token: sessao.token, p_usuarios: nomes });
+      fecharJanela();
+      toast("Ordem dos logins salva.", "ok");
+      abrirUsuarios();
+    } catch (err) { b.disabled = false; b.textContent = "Salvar ordem"; toast(err.message, "erro"); }
+  };
+}
