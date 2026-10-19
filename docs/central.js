@@ -377,10 +377,10 @@ function celulaGrade(p, c, porCod = {}) {
     case "ice": return `<td class="num txt-suave">${esc(p.ice ?? "")}</td>`;
     case "desc": return `<td class="desc">${esc(p.d)}</td>`;
     case "foto": {
-      // Oriental: miniatura (clique amplia) · Flores: link "Ver", igual à tela da loja
+      // miniatura (clique amplia); se a foto não abrir, vira o link "Ver"
       const url = String(p.foto || "").trim();
       if (!/^https?:\/\//.test(url)) return '<td class="foto-cel"></td>';
-      return `<td class="foto-cel">${cR.miniatura ? `<img src="${esc(url)}" alt="" loading="lazy" onerror="this.remove()" data-ampliar>` : `<a href="${esc(url)}" target="_blank" rel="noopener">Ver</a>`}</td>`;
+      return `<td class="foto-cel">${fotoMini(url, "data-ampliar")}</td>`;
     }
     case "alerta": return `<td class="alerta-cel">${esc((porCod[p.c] || []).join(" "))}</td>`;
     case "total": return `<td class="num total" data-total="${p.c}">${totalLinha(p) || ""}</td>`;

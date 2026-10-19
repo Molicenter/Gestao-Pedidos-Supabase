@@ -50,7 +50,7 @@ function regras(setor) {
     erp: !manoel,                            // Cód. ERP e Estoque
     flores,                                  // Cód. Barra no lugar do Fornecedor
     foto: flores || oriental,                // coluna Foto
-    miniatura: oriental,                     // Oriental: miniatura · Flores: link "Ver"
+    miniatura: flores || oriental,           // miniatura na linha (clique amplia)
   };
 }
 // agrupa "BIG FRANGO - *" e "PIONEIRO - *" num rótulo só no filtro
@@ -527,10 +527,18 @@ function renderSetor() {
   aplicarFiltro();
   renderBarra();
 }
-function fotoHtml(p) {
-  const url = String(p.foto || "").trim();
-  if (!/^https?:\/\//.test(url)) return "";
-  return R.miniatura ? `<img src="${esc(url)}" alt="" loading="lazy" onerror="this.remove()">` : `<a href="${esc(url)}" target="_blank" rel="noopener">Ver</a>`;
+function fotoHtml(p) { return fotoMini(p.foto); }
+// miniatura da foto do produto. O app é https: link http (as fotos de Flores, no servidor antigo)
+// é pedido por https; se o servidor não abrir, a miniatura vira o link "Ver" de antes.
+function fotoMini(link, extra = "") {
+  const url = String(link || "").trim();
+  if (!/^https?:\/\//i.test(url)) return "";
+  return `<img src="${esc(url.replace(/^http:\/\//i, "https://"))}" alt="" loading="lazy" ${extra} data-original="${esc(url)}" onerror="fotoFalhou(this)">`;
+}
+function fotoFalhou(img) {
+  const a = document.createElement("a");
+  a.href = img.dataset.original; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Ver";
+  img.replaceWith(a);
 }
 function linhasVisiveis() { return $$(".produto:not([hidden])"); }
 function aplicarFiltro() {
