@@ -563,3 +563,8 @@ details.alerta-curva table { width: auto; min-width: 60%; }
 .ordem-us-linha .num { color: var(--texto-suave); font-weight: 700; text-align: right; }
 .ordem-us-linha .btn { min-width: 40px; }
 .ordem-us-linha .btn:disabled { opacity: .35; }
+/* ---------- v1.7.2: copiar fotos pro Supabase ---------- */
+.aviso-fotos { align-items: center; flex-wrap: wrap; }
+.aviso-fotos > span { flex: 1; min-width: 240px; }
+.barra-prog { height: 8px; border-radius: 6px; background: color-mix(in srgb, currentColor 18%, transparent); margin: 8px 0 4px; overflow: hidden; }
+.barra-prog i { display: block; height: 100%; background: currentColor; border-radius: 6px; transition: width .3s; }

@@ -244,6 +244,55 @@ async function abrirSetorCentral(s, aba, recarregar = false) {
   if (aba === "separacao") renderSeparacao();
   else if (aba === "fornecedores") renderFornecedores();
   else if (aba === "porfornecedor") renderPorFornecedor();
+  avisoFotosHttp();
+}
+
+// ---------- fotos em servidor sem https (Flores): copiar pro Supabase ----------
+const fotoHttp = (p) => /^http:\/\//i.test(String(p.foto || "").trim());
+let resultadoFotos = null;   // { setor, html } — mostrado depois que a tela recarrega
+function avisoFotosHttp() {
+  if (sessao?.perfil !== "admin" || !cd || $("#aviso-fotos")) return;
+  const n = cd.produtos.filter(fotoHttp).length;
+  const pag = $("#conteudo .pagina");
+  if (pag && resultadoFotos?.setor === cd.setor) {
+    pag.insertAdjacentHTML("afterbegin", `<div class="faixa ok aviso-fotos" id="aviso-fotos-ok"><span>${resultadoFotos.html}</span></div>`);
+    resultadoFotos = null;
+  }
+  if (!n || !pag) return;
+  pag.insertAdjacentHTML("afterbegin", `<div class="faixa aviso aviso-fotos" id="aviso-fotos"><span>📷 <b>${n} ${n === 1 ? "foto" : "fotos"}</b> deste setor ${n === 1 ? "está" : "estão"} num servidor antigo, sem https — por isso ${n === 1 ? "aparece" : "aparecem"} só como link “Ver”. Copie uma vez para o Supabase e as miniaturas passam a aparecer na lista.</span>
+    <button class="btn btn-primario btn-pequeno" type="button" id="btn-copiar-fotos">Copiar fotos para o Supabase</button></div>`);
+  $("#btn-copiar-fotos").onclick = copiarFotos;
+}
+async function copiarFotos() {
+  const box = $("#aviso-fotos"), setor = cd.setor, s = cSetor, pular = [];
+  let feitos = 0, faltam = cd.produtos.filter(fotoHttp).length;
+  const total = faltam;
+  const progresso = () => {
+    const pct = total ? Math.round(((total - faltam) / total) * 100) : 100;
+    box.innerHTML = `<div style="flex:1"><b>Copiando as fotos de ${esc(s.titulo)}…</b> ${feitos} de ${total}${pular.length ? ` · ${pular.length} não abriram` : ""}
+      <div class="barra-prog"><i style="width:${pct}%"></i></div><small>Pode continuar usando a tela; não feche o app até terminar.</small></div>`;
+  };
+  progresso();
+  try {
+    for (;;) {
+      const r = await funcaoEdge("pedidos-fotos", { setor, pular });
+      feitos += r.feitos;
+      for (const f of r.falhas || []) pular.push(f.c);
+      faltam = r.faltam;
+      progresso();
+      if (!r.faltam || (!r.feitos && !(r.falhas || []).length)) break;
+    }
+    const nomes = pular.slice(0, 15).map((c) => cd?.produtos.find((p) => p.c === c)?.d || c);
+    const html = `✔ <b>${feitos} ${feitos === 1 ? "foto copiada" : "fotos copiadas"}</b> para o Supabase.${pular.length ? ` ${pular.length} não abriram no servidor antigo e continuam como “Ver”: ${esc(nomes.join(", "))}${pular.length > 15 ? "…" : ""}. Confira o link delas no Catálogo.` : ""}`;
+    toast(`${feitos} fotos copiadas.`, "ok");
+    // recarrega pra mostrar as miniaturas (se não houver ajuste não salvo na tela)
+    if (cSetor === s && !centralSujo()) { resultadoFotos = { setor, html }; cd = null; await abrirSetorCentral(s, abaAtual, true); }
+    else { box.className = "faixa ok aviso-fotos"; box.innerHTML = `<span>${html} Clique em Atualizar para ver as miniaturas.</span>`; }
+  } catch (err) {
+    box.className = "faixa erro aviso-fotos";
+    box.innerHTML = `<span>Não consegui terminar de copiar (${feitos} já foram): ${esc(err.message)}</span><button class="btn btn-secundario btn-pequeno" type="button" id="btn-copiar-fotos">Tentar de novo</button>`;
+    $("#btn-copiar-fotos").onclick = copiarFotos;
+  }
 }
 function prepararDados(d) {
   cd = d; cVal = {}; cOrig = {}; cExt = {}; cExtOrig = {}; cMedia = {}; cBloq = {}; cFiltro = "Todos"; pf = null;

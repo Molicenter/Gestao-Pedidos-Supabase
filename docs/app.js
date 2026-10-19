@@ -104,6 +104,7 @@ const MENSAGENS = {
   SEM_PEDIDO_NAO_PERMITIDO: "Este setor não tem a opção Sem Pedido Hoje.",
   TELEGRAM_NAO_CONFIGURADO: "O aviso do Telegram ainda não foi configurado (falta rodar o SQL 02).",
   TELEGRAM_FALHOU: "O Telegram não aceitou o aviso agora.",
+  SEM_PERMISSAO: "Seu login não tem permissão para isso.",
   "Could not find the function": "O banco ainda não tem as funções do app web (falta rodar o SQL 01).",
 };
 function traduzir(msg) {
@@ -131,12 +132,18 @@ async function rpc(fn, args = {}) {
   }
   return corpo;
 }
-async function avisos(action, extra) {
-  const resp = await fetch(`${CFG.SUPABASE_URL}/functions/v1/pedidos-avisos`, {
-    method: "POST",
-    headers: { apikey: CFG.SUPABASE_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({ action, token: sessao?.token, ...extra }),
-  });
+async function avisos(action, extra) { return funcaoEdge("pedidos-avisos", { action, ...extra }); }
+// chama uma função do Supabase (Edge Function) mandando o token da sessão
+async function funcaoEdge(nome, corpo) {
+  let resp;
+  try {
+    resp = await fetch(`${CFG.SUPABASE_URL}/functions/v1/${nome}`, {
+      method: "POST",
+      headers: { apikey: CFG.SUPABASE_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ token: sessao?.token, ...corpo }),
+    });
+  } catch { throw new Error("Sem conexão com a internet. Tente de novo."); }
+  if (resp.status === 404) throw new Error(`A função ${nome} ainda não está publicada no Supabase.`);
   const j = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(traduzir(j.erro || `Erro ${resp.status}`));
   return j;
@@ -528,12 +535,14 @@ function renderSetor() {
   renderBarra();
 }
 function fotoHtml(p) { return fotoMini(p.foto); }
-// miniatura da foto do produto. O app é https: link http (as fotos de Flores, no servidor antigo)
-// é pedido por https; se o servidor não abrir, a miniatura vira o link "Ver" de antes.
+// miniatura da foto do produto. O app é https e o navegador não mostra imagem http:
+// link http (servidor antigo, sem https) fica como link "Ver" até ser copiado pro Supabase
+// (botão na central). Foto https que não abrir também vira "Ver".
 function fotoMini(link, extra = "") {
   const url = String(link || "").trim();
   if (!/^https?:\/\//i.test(url)) return "";
-  return `<img src="${esc(url.replace(/^http:\/\//i, "https://"))}" alt="" loading="lazy" ${extra} data-original="${esc(url)}" onerror="fotoFalhou(this)">`;
+  if (/^http:\/\//i.test(url)) return `<a href="${esc(url)}" target="_blank" rel="noopener">Ver</a>`;
+  return `<img src="${esc(url)}" alt="" loading="lazy" ${extra} data-original="${esc(url)}" onerror="fotoFalhou(this)">`;
 }
 function fotoFalhou(img) {
   const a = document.createElement("a");
