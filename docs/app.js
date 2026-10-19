@@ -187,7 +187,9 @@ async function sair(silencioso) {
   montarLogin();
 }
 $("#btn-sair").addEventListener("click", async () => {
-  if (temAlteracaoPendente() && !confirm("Ainda há alterações sendo salvas. Sair mesmo assim?")) return;
+  const n = tamanhoFila();
+  if (n && !confirm(`${n} ${n === 1 ? "item ainda não subiu" : "itens ainda não subiram"} por falta de internet. Ficam guardados neste aparelho e sobem quando você entrar de novo com o mesmo usuário e abrir o setor. Sair mesmo assim?`)) return;
+  if (!n && temAlteracaoPendente() && !confirm("Ainda há alterações sendo salvas. Sair mesmo assim?")) return;
   sair(false);
 });
 
@@ -322,7 +324,7 @@ function renderPainel() {
       <div class="kpi laranja"><small>Em rascunho</small><strong class="num">${rasc.length}</strong><span>${rasc.length ? "falta clicar em Salvar pedido" : "nada esperando confirmação"}</span></div>
       <div class="kpi magenta"><small>Próximo prazo</small><strong class="num">${prox ? prox.s.limites.find((l) => l.d.includes(agoraSP().getDay())).h : "—"}</strong><span>${prox ? esc(prox.s.titulo) + " · " + esc(prox.pz.txt.toLowerCase()) : "sem prazo pela frente hoje"}</span></div>
     </div>
-    ${painel?.estoque_em ? `<p class="aviso-estoque">Estoque do ERP atualizado em ${esc(painel.estoque_em)} (atualiza sozinho a cada 30 minutos, das 6h às 22h).</p>` : ""}
+    ${painel?.estoque_em ? `<p class="aviso-estoque">Estoque do ERP atualizado em ${esc(painel.estoque_em)}.</p>` : ""}
     ${GRUPOS.map((g) => `<section class="grupo" style="--cor:var(--g-${g.id})">
       <h3 class="grupo-titulo" style="color:var(--g-${g.id}-texto)">${g.nome}</h3>
       <div class="cards">${sit.filter((x) => x.s.g === g.id).map(({ s, st, pz }) => `
@@ -352,12 +354,15 @@ let gravando = 0, falhou = null, ultimaGravacao = null;
 let tudoConfirmado = true;
 let obsOriginal = "";
 let filtroForn = "Todos";
+let hist = {};             // código → o que a loja pediu no último ciclo fechado
+let histCiclo = null;      // "DD/MM" do último ciclo (null = sem histórico ainda)
+let semRede = false;       // a última tentativa de gravar falhou por falta de conexão
 
 function temAlteracaoPendente() {
   if (telaAtual === "central") return centralSujo();
   if (telaAtual !== "setor") return false;
   const obsMudou = R?.obs && $("#obs-loja") && $("#obs-loja").value.trim() !== obsOriginal.trim();
-  return gravando > 0 || Object.keys(timers).length > 0 || !!falhou || obsMudou;
+  return gravando > 0 || Object.keys(timers).length > 0 || !!falhou || obsMudou || tamanhoFila() > 0;
 }
 async function podeSairDoSetor() {
   if (telaAtual !== "setor") return true;
@@ -374,28 +379,46 @@ async function abrirSetor(s) {
   if (telaAtual === "setor" && setorAberto && setorAberto.nome !== s.nome && !(await podeSairDoSetor())) return;
   telaAtual = "setor"; setorAberto = s; R = regras(s.nome);
   valores = {}; noBanco = {}; filas = {}; timers = {}; gravando = 0; falhou = null; ultimaGravacao = null; filtroForn = "Todos";
+  semRede = !navigator.onLine;
   clearInterval(timerPainel);
   $("#pg-titulo").textContent = s.titulo;
   $("#pg-sub").textContent = `Prazo: ${s.prazo}. O que você digita é salvo sozinho; ao terminar, clique em Salvar pedido.`;
   $("#conteudo").innerHTML = '<div class="vazio">Carregando produtos...</div>';
   $("#barra-total").hidden = true;
   renderNav();
+  let h = null;
   try {
-    dados = await rpc("pedidos_web_setor", { p_token: sessao.token, p_loja: lojaAtual, p_setor: s.nome });
+    [dados, h] = await Promise.all([
+      rpc("pedidos_web_setor", { p_token: sessao.token, p_loja: lojaAtual, p_setor: s.nome }),
+      rpc("pedidos_web_historico_loja", { p_token: sessao.token, p_loja: lojaAtual, p_setor: s.nome }).catch(() => null),
+    ]);
   } catch (err) {
     $("#conteudo").innerHTML = `<div class="cartao"><p class="faixa erro">${esc(err.message)}</p></div>`;
     return;
   }
+  hist = {}; histCiclo = h && h.ciclo && h.itens.length ? h.ciclo : null;
+  if (histCiclo) for (const [c, q, t] of h.itens) hist[c] = R.texto ? String(t || "").trim() : (Number(q) > 0 ? String(Math.trunc(Number(q))) : "");
   for (const p of dados.pedido) {
     const v = R.texto ? String(p.t || "").trim() : (Number(p.q) > 0 ? String(Math.trunc(Number(p.q))) : "");
     valores[p.c] = v; noBanco[p.c] = v;
   }
+  // digitado sem internet num acesso anterior: volta pra tela e sobe agora
+  const fila = lerFila(), codigos = new Set(dados.produtos.map((p) => p.c));
+  let recuperados = 0;
+  for (const k of Object.keys(fila)) {
+    if (codigos.has(Number(k))) { valores[Number(k)] = fila[k]; recuperados++; } else delete fila[k];
+  }
+  gravarFila(fila);
   tudoConfirmado = dados.pedido.every((p) => p.ok !== false);
   obsOriginal = dados.obs || "";
   // ordenação: Fornecedor e Descrição (Flores: só Descrição)
   const cmp = (a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" });
   dados.produtos.sort((a, b) => (R.flores ? 0 : cmp(a.f, b.f)) || cmp(a.d, b.d));
   renderSetor();
+  if (recuperados) {
+    toast(`${recuperados} ${recuperados === 1 ? "item digitado" : "itens digitados"} sem internet ${recuperados === 1 ? "foi recuperado" : "foram recuperados"} deste aparelho e ${recuperados === 1 ? "está sendo enviado" : "estão sendo enviados"}.`, "ok");
+    reenviarFila(true);
+  }
 }
 
 function colunasSetor() {
@@ -406,6 +429,7 @@ function colunasSetor() {
   c.push(["desc", "Descrição", "minmax(0, 1.6fr)"]);
   if (R.media) c.push(["media", "Média", "68px"]);
   if (R.erp) c.push(["est", "Estoque", "68px"]);
+  if (histCiclo) c.push(["ant", `Últ. ${histCiclo}`, R.texto ? "minmax(70px, .4fr)" : "64px"]);
   c.push(["qtd", R.texto ? "Pedido" : "Qtde", R.texto ? "140px" : "150px"]);
   return c;
 }
@@ -430,11 +454,12 @@ function renderSetor() {
       desc: `<span class="p-nome">${esc(p.d)}<small>${esc(R.flores ? p.b : p.f)}${R.erp ? " · " + esc(p.erp) : ""}</small></span>`,
       media: `<span class="p-num num">${fmtNum(p.m, 2)}</span>`,
       est: `<span class="p-num num">${fmtNum(Math.trunc(p.e))}</span>`,
+      ant: `<span class="p-num p-ant ${R.texto ? "" : "num"}" title="Pedido desta loja no ciclo fechado em ${esc(histCiclo || "")}">${esc(hist[p.c] || "–")}</span>`,
       qtd: `<span class="qtd">${R.texto
         ? `<input class="texto" type="text" data-c="${p.c}" value="${esc(v)}" aria-label="Pedido de ${esc(p.d)}" autocomplete="off">`
         : `<button type="button" data-passo="-1" data-c="${p.c}" aria-label="Menos">−</button><input class="num" type="text" inputmode="numeric" data-c="${p.c}" value="${esc(v)}" aria-label="Quantidade de ${esc(p.d)}" autocomplete="off"><button type="button" data-passo="1" data-c="${p.c}" aria-label="Mais">+</button>`}</span>`,
     };
-    const info = [R.media ? `média ${fmtNum(p.m, 2)}` : "", R.erp ? `estoque ${fmtNum(Math.trunc(p.e))}` : ""].filter(Boolean).join(" · ");
+    const info = [R.media ? `média ${fmtNum(p.m, 2)}` : "", R.erp ? `estoque ${fmtNum(Math.trunc(p.e))}` : "", histCiclo && hist[p.c] ? `últ. ${hist[p.c]}` : ""].filter(Boolean).join(" · ");
     return `<div class="produto" data-linha="${p.c}" data-g="${esc(grupoFornecedor(p.f))}" data-busca="${esc(norm(p.d + " " + (R.erp ? p.erp : "") + " " + (R.flores ? p.b : "")))}">
       ${cols.map(([k]) => cel[k]).join("")}${info ? `<span class="p-info num">${info}</span>` : ""}<span class="aviso-curva" hidden></span></div>`;
   }).join("");
@@ -451,7 +476,7 @@ function renderSetor() {
         <span class="salvo" id="salvo"></span>
       </div>
       ${temProdutos ? `<div class="lista-produtos" style="--colunas:${cols.map((c) => c[2]).join(" ")}">
-        <div class="cab-lista">${cols.map(([k, t]) => `<span class="${["media", "est", "qtd"].includes(k) ? "dir" : ""}">${t}</span>`).join("")}</div>
+        <div class="cab-lista">${cols.map(([k, t]) => `<span class="${["media", "est", "qtd"].includes(k) || (k === "ant" && !R.texto) ? "dir" : ""}">${t}</span>`).join("")}</div>
         ${linhas}
         <p class="vazio" id="nada-filtro" hidden>Nenhum produto com esse filtro.</p>
       </div>` : '<p class="vazio">Nenhum produto liberado para esta loja neste setor.</p>'}
@@ -518,6 +543,31 @@ function aplicarFiltro() {
   const nada = $("#nada-filtro"); if (nada) nada.hidden = n > 0;
 }
 
+// ---------- fila no aparelho: o que não subiu por falta de internet ----------
+// Cada valor é guardado no aparelho ANTES de ir pro banco e só sai daqui quando o banco confirma.
+// Se a internet cair (ou a página fechar), nada se perde: sobe quando a conexão voltar
+// ou na próxima vez que abrir o setor neste aparelho.
+const chaveFila = () => `pedidos_web_fila|${sessao?.usuario}|${lojaAtual}|${setorAberto?.nome}`;
+function lerFila() { try { return JSON.parse(localStorage.getItem(chaveFila())) || {}; } catch { return {}; } }
+function gravarFila(f) { try { Object.keys(f).length ? localStorage.setItem(chaveFila(), JSON.stringify(f)) : localStorage.removeItem(chaveFila()); } catch {} }
+function guardarNaFila(c, v) { const f = lerFila(); f[c] = v; gravarFila(f); }
+function tirarDaFila(c, v) { const f = lerFila(); if (c in f && (v === undefined || f[c] === v)) { delete f[c]; gravarFila(f); } }
+const tamanhoFila = () => (telaAtual === "setor" && setorAberto ? Object.keys(lerFila()).length : 0);
+const semConexao = (err) => !navigator.onLine || String(err?.message || "").startsWith("Sem conexão");
+let reenviando = false;
+async function reenviarFila(silencioso = false) {
+  if (reenviando || telaAtual !== "setor" || !navigator.onLine) return;
+  const f = lerFila(); if (!Object.keys(f).length) return;
+  reenviando = true;
+  try { await Promise.allSettled(Object.keys(f).map((c) => gravarItem(Number(c)))); }
+  finally { reenviando = false; }
+  if (!silencioso && !tamanhoFila() && !semRede) toast("Conexão de volta: tudo o que foi digitado sem internet já está salvo.", "ok");
+}
+window.addEventListener("online", () => { semRede = false; atualizarSalvo(); reenviarFila(); });
+window.addEventListener("offline", () => { if (telaAtual === "setor") { semRede = true; atualizarSalvo(); toast("Sem internet. Pode continuar digitando: fica guardado neste aparelho e sobe sozinho quando a conexão voltar.", "erro"); } });
+// a rede pode voltar sem o navegador avisar: tenta de novo a cada 15 s enquanto houver fila
+setInterval(() => { if (tamanhoFila() && navigator.onLine && !gravando) reenviarFila(); }, 15000);
+
 // ---------- digitação e salvamento automático ----------
 function aoDigitar(input, agora) {
   const c = Number(input.dataset.c);
@@ -539,19 +589,32 @@ function gravarItem(c) {
   const alvo = normalizado(valores[c]);
   const anterior = filas[c] || Promise.resolve();
   filas[c] = anterior.then(async () => {
-    if (normalizado(noBanco[c]) === alvo) return;
+    if (normalizado(noBanco[c]) === alvo) { tirarDaFila(c, alvo); return; }
+    guardarNaFila(c, alvo);            // fica no aparelho até o banco confirmar
+    const inp = $(`input[data-c="${c}"]`);
+    if (!navigator.onLine) { semRede = true; inp?.classList.add("pendente"); atualizarSalvo(); return; }
     gravando++; atualizarSalvo();
     try {
       await rpc("pedidos_web_salvar_item", { p_token: sessao.token, p_loja: lojaAtual, p_setor: setorAberto.nome, p_codigo: c, p_valor: alvo });
       noBanco[c] = alvo;
+      tirarDaFila(c, alvo);
+      semRede = false;
       tudoConfirmado = false;
       ultimaGravacao = horaBR();
       if (falhou === c) falhou = null;
-      $(`input[data-c="${c}"]`)?.classList.remove("erro");
+      inp?.classList.remove("erro", "pendente");
     } catch (err) {
-      falhou = c;
-      $(`input[data-c="${c}"]`)?.classList.add("erro");
-      toast("Não consegui salvar o último item: " + err.message + " Confira a conexão; ele será salvo de novo ao clicar em Salvar pedido.", "erro");
+      if (semConexao(err)) {
+        // sem internet: não é erro do pedido, só espera a conexão
+        if (!semRede) toast("Sem internet. Pode continuar digitando: fica guardado neste aparelho e sobe sozinho quando a conexão voltar.", "erro");
+        semRede = true;
+        inp?.classList.add("pendente");
+      } else {
+        if (err.message === MENSAGENS.PRODUTO_INVALIDO) tirarDaFila(c);
+        falhou = c;
+        inp?.classList.add("erro");
+        toast("Não consegui salvar o último item: " + err.message + " Ele será salvo de novo ao clicar em Salvar pedido.", "erro");
+      }
     } finally {
       gravando--; atualizarSalvo(); atualizarResumo();
     }
@@ -565,7 +628,9 @@ async function descarregar() {
 }
 function atualizarSalvo() {
   const el = $("#salvo"); if (!el) return;
-  if (gravando > 0 || Object.keys(timers).length) { el.className = "salvo gravando"; el.innerHTML = "<i></i>Salvando..."; }
+  const n = tamanhoFila();
+  if (semRede && n) { el.className = "salvo semrede"; el.innerHTML = `<i></i>Sem internet · ${n} ${n === 1 ? "item guardado" : "itens guardados"} no aparelho`; }
+  else if (gravando > 0 || Object.keys(timers).length) { el.className = "salvo gravando"; el.innerHTML = "<i></i>Salvando..."; }
   else if (falhou) { el.className = "salvo falhou"; el.innerHTML = "<i></i>Falhou ao salvar"; }
   else if (ultimaGravacao) { el.className = "salvo"; el.innerHTML = `<i></i>Salvo às ${ultimaGravacao}`; }
   else el.innerHTML = "";
@@ -615,7 +680,8 @@ function renderBarra() {
   $("#btn-imprimir").onclick = imprimir;
   $("#btn-sem-pedido")?.addEventListener("click", confirmarSemPedido);
   for (const p of dados.produtos) if (valores[p.c]) marcarLinha(p.c);
-  atualizarResumo();
+  for (const c of Object.keys(lerFila())) $(`input[data-c="${c}"]`)?.classList.add("pendente");
+  atualizarResumo(); atualizarSalvo();
 }
 
 // ---------- Salvar pedido ----------
@@ -626,9 +692,11 @@ async function salvarPedido() {
     await descarregar();
     const itens = dados.produtos.map((p) => ({ c: p.c, v: normalizado(valores[p.c]) }));
     const obs = R.obs ? $("#obs-loja").value : null;
+    if (!navigator.onLine) throw new Error("Sem internet agora. O pedido está guardado neste aparelho; quando a conexão voltar, clique em Salvar pedido de novo.");
     const r = await rpc("pedidos_web_salvar_pedido", { p_token: sessao.token, p_loja: lojaAtual, p_setor: setorAberto.nome, p_itens: itens, p_obs: obs });
     for (const it of itens) noBanco[it.c] = it.v;
-    falhou = null; $$(".qtd input.erro").forEach((i) => i.classList.remove("erro"));
+    gravarFila({}); semRede = false;
+    falhou = null; $$(".qtd input.erro, .qtd input.pendente").forEach((i) => i.classList.remove("erro", "pendente"));
     tudoConfirmado = true;
     if (R.obs) obsOriginal = obs || "";
     ultimaGravacao = r.hora || horaBR();
@@ -658,6 +726,7 @@ function confirmarSemPedido() {
       for (const c of Object.keys(timers)) { clearTimeout(timers[c]); delete timers[c]; }
       await Promise.allSettled(Object.values(filas));
       await rpc("pedidos_web_sem_pedido", { p_token: sessao.token, p_loja: lojaAtual, p_setor: setorAberto.nome });
+      gravarFila({});
       let aviso = true;
       try { await avisos("sem_pedido", { setor: setorAberto.nome, loja: lojaAtual }); } catch (err) { aviso = err.message; }
       fecharJanela();
@@ -697,7 +766,7 @@ function linhasExport() {
 }
 function colunasExport() {
   // mesmas colunas da tela, sem a Foto
-  return colunasSetor().filter(([k]) => k !== "foto").map(([k]) => ({
+  return colunasSetor().filter(([k]) => k !== "foto" && k !== "ant").map(([k]) => ({
     k,
     tela: { cod: "Cód. ERP", barra: "Cód. Barra", forn: "Fornecedor", desc: "Descrição", media: "Média (90d)", est: "Estoque ERP", qtd: "Pedido" }[k],
     excel: { cod: "Código", barra: "Cód. Barra", forn: "Fornecedor", desc: "Descrição", media: "Média (90d)", est: "Estoque", qtd: "Pedido" }[k],

@@ -543,3 +543,18 @@ details.alerta-curva table { width: auto; min-width: 60%; }
 .setores-grade { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; padding: 6px 0 0 26px; }
 .setores-grade.desligado { opacity: .4; pointer-events: none; }
 .janela .form-us { max-height: 70vh; overflow-y: auto; }
+
+/* ---------- v1.5: sem internet, último ciclo, histórico, monitor ---------- */
+.salvo.semrede { color: var(--laranja); }
+.salvo.semrede i { animation: piscar 1.4s infinite; }
+.qtd input.pendente { border-color: var(--laranja); border-style: dashed; }
+.p-ant { color: var(--texto-suave); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.monitor-erp { margin-bottom: 4px; }
+.monitor-erp ul { margin: 6px 0 0; padding-left: 18px; font-weight: 600; }
+.monitor-erp .dica { color: inherit; opacity: .85; margin-top: 6px; }
+.hist-grade td small { display: block; font-size: .7rem; font-weight: 700; }
+.hist-grade td.alto small { color: var(--vermelho); }
+.hist-grade td.baixo small { color: var(--azul); }
+.hist-grade td.vazio-h { color: var(--texto-fraco); }
+.delta-mais { color: var(--vermelho); font-weight: 700; }
+.delta-menos { color: var(--azul); font-weight: 700; }

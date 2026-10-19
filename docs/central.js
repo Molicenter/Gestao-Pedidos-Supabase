@@ -21,10 +21,11 @@ const ABAS = {
   fornecedores: "Visão Fornecedores",
   loja: "Visão das Lojas",
   log: "Log de Pedidos",
+  historico: "Histórico",
   catalogo: "Catálogo de Produtos",
 };
 // FLV Normal/Ofertas abrem na Separação; os demais na Visão Fornecedores (igual ao Streamlit)
-const abasDoSetor = (s) => (ehFLV(s.nome) ? ["separacao", "porfornecedor", "fornecedores", "loja", "log", "catalogo"] : ["fornecedores", "separacao", "loja", "log", "catalogo"]);
+const abasDoSetor = (s) => (ehFLV(s.nome) ? ["separacao", "porfornecedor", "fornecedores", "loja", "log", "historico", "catalogo"] : ["fornecedores", "separacao", "loja", "log", "historico", "catalogo"]);
 
 // 🚚 mapa fixo fornecedor → produtos (por Cód. Iceasa), só para o Pedido por Fornecedor do FLV
 const MAPA_FORNECEDORES_FLV = {
@@ -160,12 +161,20 @@ async function abrirCentral() {
     if (!centralPainel) return;
   }
   renderNavCentral();
+  // situação da rotina do servidor (estoque/médias); se o SQL v1.5 ainda não rodou, só não mostra
+  rpc("pedidos_web_monitor", { p_token: sessao.token }).then((m) => {
+    const el = $("#monitor-erp"); if (!el || !m?.problemas) return;
+    el.innerHTML = `<div class="faixa erro monitor-erp"><div><b>⚠️ A rotina do ERP no servidor parou de atualizar.</b>
+      <ul>${m.problemas.split("\n").map((l) => `<li>${esc(l)}</li>`).join("")}</ul>
+      <p class="dica">Confira a tarefa “Molicenter - Estoque ERP” no Agendador de Tarefas do servidor 192.168.10.69. Até voltar, estoque e médias nas telas são da última atualização que deu certo.</p></div></div>`;
+  }).catch(() => {});
   const vis = setoresVisiveis();
   const hoje = vis.map((s) => ({ s, pz: prazoHoje(s) })).filter((x) => x.pz && !x.pz.passou).sort((a, b) => a.pz.min - b.pz.min);
   const rasc = vis.filter((s) => (centralPainel.setores?.[s.nome]?.rascunho || []).length);
   const comPedido = vis.filter((s) => (centralPainel.setores?.[s.nome]?.itens || 0) > 0);
   const med = centralPainel.medias;
   $("#conteudo").innerHTML = `<div class="pagina">
+    <div id="monitor-erp"></div>
     <div class="kpis">
       <div class="kpi destaque"><small>Prazos hoje</small><strong class="num">${hoje.length}</strong><span>${hoje.length ? esc(hoje.map((x) => x.s.titulo).join(", ")) : "nenhum setor fecha hoje"}</span></div>
       <div class="kpi verde"><small>Setores com pedido</small><strong class="num">${comPedido.length}</strong><span>de ${vis.length} setores</span></div>
@@ -214,10 +223,12 @@ async function abrirSetorCentral(s, aba, recarregar = false) {
     fornecedores: "Pedido consolidado por fornecedor, com as lojas e o total.",
     porfornecedor: "Quantidades das lojas e preços da Separação, montados por fornecedor para mandar no WhatsApp.",
     log: "Quando cada loja confirmou o pedido, e quando o Administrador salvou por uma loja.",
+    historico: "O pedido final de cada ciclo (guardado ao Limpar pedidos), comparado com o pedido atual e com a média de venda.",
     catalogo: "Produtos do setor, nomes, códigos e em quais lojas cada produto pode ser pedido.",
   }[aba] || "";
   renderNavCentral();
   if (aba === "log") { esconderBarraCentral(); return renderLog(); }
+  if (aba === "historico") { esconderBarraCentral(); return renderHistorico(s); }
   if (aba === "catalogo") return abrirCatalogo(s, recarregar);
   if (!cd || cd.setor !== s.nome || recarregar) {
     $("#conteudo").innerHTML = '<div class="vazio">Carregando pedidos das lojas...</div>';
@@ -634,6 +645,126 @@ async function carregarLog() {
 }
 
 // ============================================================
+// Histórico (ciclos fechados pelo Limpar pedidos)
+// ============================================================
+const FAIXA_MEDIA = { alto: 1.5, baixo: 0.7 };    // pedido ÷ média: acima de 1,5x ou abaixo de 0,7x chama atenção
+const fmtX = (r) => r.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "x";
+let histDados = null, histLimite = 40;
+async function renderHistorico(s) {
+  $("#conteudo").innerHTML = '<div class="vazio">Carregando histórico...</div>';
+  try {
+    const [h, d] = await Promise.all([
+      rpc("pedidos_web_historico_setor", { p_token: sessao.token, p_setor: s.nome, p_ciclos: 10 }),
+      // busca o pedido atual de novo (as lojas podem ter digitado), a não ser que haja ajuste não salvo na Separação
+      cd && cd.setor === s.nome && centralSujo() ? null : rpc("pedidos_web_central_setor", { p_token: sessao.token, p_setor: s.nome }),
+    ]);
+    if (d) prepararDados(d);
+    histDados = h; histLimite = 40;
+  } catch (err) {
+    const falta = /Could not find|historico_setor/.test(err.message) || err.message === MENSAGENS["Could not find the function"];
+    $("#conteudo").innerHTML = `<div class="cartao"><p class="faixa ${falta ? "aviso" : "erro"}">${falta ? "O histórico ainda não está no banco (falta rodar o SQL da versão 1.5)." : esc(err.message)}</p></div>`;
+    return;
+  }
+  if (abaAtual !== "historico" || cSetor?.nome !== s.nome) return;
+  desenharHistorico();
+}
+// totais do pedido aberto (o que está na Separação agora), por loja
+function atualPorLoja() {
+  const t = {};
+  for (let l = 1; l <= 8; l++) {
+    let qtd = 0, itens = 0;
+    for (const p of cd.ativos) {
+      if (bloqueado(p.c, l)) continue;
+      const v = valor(p.c, l);
+      if (cR.texto ? String(v).trim() : qtdInt(v) > 0) { itens++; qtd += cR.texto ? 0 : qtdInt(v); }
+    }
+    t[l] = { itens, qtd };
+  }
+  return t;
+}
+function desenharHistorico() {
+  const h = histDados, ciclos = h.ciclos || [];
+  if (!ciclos.length) {
+    $("#conteudo").innerHTML = `<div class="pagina"><div class="cartao"><h3>Histórico</h3>
+      <p class="faixa info"><span>Ainda não há ciclo guardado neste setor. A partir de agora, cada vez que alguém usar <b>Limpar pedidos</b>, o pedido final de cada loja (já com os ajustes da Separação) fica guardado aqui, com a média de venda daquele dia.</span></p></div></div>`;
+    return;
+  }
+  const texto = cR.texto, ult = ciclos[0];
+  const medida = (o) => (texto ? o.itens : o.qtd);   // setores em texto comparam nº de itens
+  const unid = texto ? "itens" : "unidades";
+  // ---- 1. pedido atual × último ciclo, por loja ----
+  const atual = atualPorLoja();
+  const linhaLojas = LOJAS.map((nome, i) => {
+    const l = i + 1, a = medida(atual[l]), u = ult.lojas?.[l] ? Number(medida(ult.lojas[l])) : 0;
+    const d = u ? (a - u) / u : null;
+    return `<tr><td>${nome}</td><td class="num">${fmtNum(a)}</td><td class="num">${fmtNum(u)}</td>
+      <td class="num">${!a && !u ? "" : d === null ? '<span class="tag novo">novo</span>' : `<span class="${d > 0.3 ? "delta-mais" : d < -0.3 ? "delta-menos" : ""}">${d > 0 ? "+" : ""}${Math.round(d * 100)}%</span>`}</td></tr>`;
+  }).join("");
+  // ---- 2. por produto ----
+  const ultProd = {};
+  for (const [c, l, q, t] of h.ultimo || []) {
+    const o = (ultProd[c] ||= { q: 0, n: 0 });
+    o.q += Number(q) || 0; if (texto ? String(t).trim() : Number(q) > 0) o.n++;
+  }
+  const prods = cd.produtos.map((p) => {
+    let qa = 0, na = 0;
+    for (let l = 1; l <= 8; l++) { if (bloqueado(p.c, l)) continue; const v = valor(p.c, l); if (texto ? String(v).trim() : qtdInt(v) > 0) { na++; qa += texto ? 0 : qtdInt(v); } }
+    const u = ultProd[p.c] || { q: 0, n: 0 };
+    const a = texto ? na : qa, b = texto ? u.n : u.q;
+    return { p, a, b, d: a - b };
+  }).filter((x) => x.a || x.b);
+  // ---- 3. pedido × média, por loja, nos ciclos guardados ----
+  const razao = {};
+  for (const c of ciclos) for (const [l, o] of Object.entries(c.lojas || {})) {
+    if (!(Number(o.m) > 0)) continue;
+    const r = (razao[l] ||= { qm: 0, m: 0, n: 0 }); r.qm += Number(o.qm) || 0; r.m += Number(o.m); r.n++;
+  }
+  const temMedia = !texto && Object.keys(razao).length > 0;
+  const celCiclo = (o) => {
+    if (!o) return '<td class="num vazio-h">–</td>';
+    const r = !texto && Number(o.m) > 0 ? Number(o.qm) / Number(o.m) : null;
+    const cls = r === null ? "" : r > FAIXA_MEDIA.alto ? "alto" : r < FAIXA_MEDIA.baixo ? "baixo" : "";
+    return `<td class="num ${cls}">${fmtNum(medida(o))}${r !== null ? `<small title="pedido ÷ média de venda">${fmtX(r)}</small>` : ""}</td>`;
+  };
+  $("#conteudo").innerHTML = `<div class="pagina">
+    <div class="grade-2">
+      <div class="cartao"><h3>Pedido atual × último ciclo <small>fechado em ${esc(ult.em)}</small></h3>
+        <div class="tabela-wrap"><table class="tabela-simples"><thead><tr><th>Loja</th><th class="num">Atual</th><th class="num">Último ciclo</th><th class="num">Diferença</th></tr></thead>
+        <tbody>${linhaLojas}</tbody></table></div>
+        <p class="dica" style="margin-top:8px">Em ${unid}. “Atual” é o que está na Separação agora (pode ainda estar sendo digitado).</p></div>
+      ${temMedia ? `<div class="cartao"><h3>Pedido × média de venda <small>últimos ${ciclos.length} ciclos</small></h3>
+        <div class="tabela-wrap"><table class="tabela-simples"><thead><tr><th>Loja</th><th class="num">Ciclos</th><th class="num">Pedido ÷ média</th><th>Leitura</th></tr></thead><tbody>
+        ${LOJAS.map((nome, i) => { const r = razao[i + 1]; if (!r) return `<tr><td>${nome}</td><td class="num">0</td><td></td><td class="dica">sem pedido com média</td></tr>`;
+          const x = r.qm / r.m;
+          return `<tr><td>${nome}</td><td class="num">${r.n}</td><td class="num"><b>${fmtX(x)}</b></td><td>${x > FAIXA_MEDIA.alto ? '<span class="tag alerta">pede bem acima da média</span>' : x < FAIXA_MEDIA.baixo ? '<span class="tag novo">pede abaixo da média</span>' : '<span class="tag ok">equilibrado</span>'}</td></tr>`; }).join("")}
+        </tbody></table></div>
+        <p class="dica" style="margin-top:8px">Soma do pedido ÷ soma da média de venda dos mesmos produtos (só produtos com média). Acima de ${fmtX(FAIXA_MEDIA.alto)}: confira sobra e quebra. Abaixo de ${fmtX(FAIXA_MEDIA.baixo)}: risco de faltar na loja.</p></div>` : ""}
+    </div>
+    <div class="cartao"><h3>Ciclos anteriores <small>${ciclos.length} ${ciclos.length === 1 ? "ciclo" : "ciclos"}</small></h3>
+      <div class="tabela-wrap"><table class="tabela-simples hist-grade"><thead><tr><th>Fechado em</th>${LOJAS.map((l, i) => `<th class="num">L${p2(i + 1)}</th>`).join("")}<th class="num">Total</th></tr></thead><tbody>
+      ${ciclos.map((c) => `<tr><td class="num">${esc(c.em)}</td>${LOJAS.map((_, i) => celCiclo(c.lojas?.[i + 1])).join("")}<td class="num"><b>${fmtNum(Object.values(c.lojas || {}).reduce((n, o) => n + Number(medida(o)), 0))}</b></td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="dica" style="margin-top:8px">${texto ? "Número de itens pedidos por loja em cada ciclo." : "Unidades pedidas por loja em cada ciclo; embaixo, o pedido dividido pela média de venda (vermelho: acima de " + fmtX(FAIXA_MEDIA.alto) + "; azul: abaixo de " + fmtX(FAIXA_MEDIA.baixo) + ")."}</p></div>
+    <div class="cartao"><h3>Por produto: atual × último ciclo <small>${prods.length} produtos</small></h3>
+      <div class="barra-filtros"><input class="busca" id="h-busca" type="search" placeholder="Buscar produto ou código" autocomplete="off"></div>
+      <div class="tabela-wrap"><table class="tabela-simples"><thead><tr><th>Produto</th><th class="num">${texto ? "Lojas agora" : "Atual"}</th><th class="num">${texto ? "Lojas no último" : "Último ciclo"}</th><th class="num">Diferença</th></tr></thead><tbody id="h-prods"></tbody></table></div>
+      <div id="h-mais"></div></div>
+  </div>`;
+  const pintar = () => {
+    const q = norm($("#h-busca").value);
+    const vis = prods.filter((x) => !q || norm(`${x.p.d} ${x.p.erp}`).includes(q)).sort((a, b) => Math.abs(b.d) - Math.abs(a.d) || b.a - a.a);
+    $("#h-prods").innerHTML = vis.slice(0, histLimite).map((x) => `<tr><td>${esc(x.p.d)}<small class="dica" style="display:block">${esc(x.p.f)}${cR.erp ? " · " + esc(x.p.erp) : ""}</small></td>
+      <td class="num">${fmtNum(x.a)}</td><td class="num">${fmtNum(x.b)}</td>
+      <td class="num">${x.d === 0 ? "=" : `<span class="${x.d > 0 ? "delta-mais" : "delta-menos"}">${x.d > 0 ? "+" : ""}${fmtNum(x.d)}</span>`}</td></tr>`).join("")
+      || '<tr><td colspan="4" class="vazio">Nada com esse filtro.</td></tr>';
+    $("#h-mais").innerHTML = vis.length > histLimite ? `<button class="btn btn-secundario btn-pequeno" type="button" id="h-mais-btn" style="margin-top:10px">Mostrar mais (${vis.length - histLimite})</button>` : "";
+    $("#h-mais-btn")?.addEventListener("click", () => { histLimite += 40; pintar(); });
+  };
+  $("#h-busca").addEventListener("input", () => { histLimite = 40; pintar(); });
+  pintar();
+}
+
+// ============================================================
 // Limpar Pedidos (fecha o ciclo do setor)
 // ============================================================
 function confirmarLimpar(s) {
@@ -641,6 +772,7 @@ function confirmarLimpar(s) {
   abrirJanela(`<h3>Limpar todos os pedidos</h3>
     <p>Tem certeza que deseja <b>limpar todos os pedidos</b> de <b>${esc(s.titulo)}</b>?</p>
     <p>${mp ? "Apaga TODOS os pedidos pendentes do setor (de qualquer data) e as observações das lojas. As observações por produto são mantidas." : "Apaga TODOS os pedidos pendentes do setor (de qualquer data), preços/observações e observações das lojas — de todas as lojas."} <b>Não pode ser desfeito.</b></p>
+    <p class="dica">Antes de apagar, o pedido final de cada loja (com os ajustes da Separação) fica guardado na aba <b>Histórico</b>.</p>
     <div class="acoes"><button class="btn btn-secundario" type="button" data-fechar>Não, cancelar</button><button class="btn btn-perigo-forte" type="button" id="btn-limpar-sim">Sim, limpar tudo</button></div>`);
   $("#btn-limpar-sim").onclick = async (e) => {
     const b = e.currentTarget; b.disabled = true; b.textContent = "Limpando...";
@@ -649,7 +781,7 @@ function confirmarLimpar(s) {
       fecharJanela();
       cd = null; centralPainel = null;
       await rotaCentral(s, abaAtual === "log" ? "log" : abaAtual);
-      toast(`Pedidos de ${s.titulo} limpos (${r.apagados} lançamentos).`, "ok");
+      toast(`Pedidos de ${s.titulo} limpos (${r.apagados} lançamentos)${r.historico ? ` · ${r.historico} guardados no Histórico` : ""}.`, "ok");
     } catch (err) { b.disabled = false; b.textContent = "Sim, limpar tudo"; toast(err.message, "erro"); }
   };
 }
