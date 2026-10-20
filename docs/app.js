@@ -60,6 +60,15 @@ function grupoFornecedor(f) {
   if (n.startsWith("pioneiro")) return "PIONEIRO";
   return String(f || "").trim();
 }
+// ordena produtos na ordem dos fornecedores do setor (Catálogo → Ordenar fornecedores),
+// depois pelo nome do fornecedor e pela descrição. Vale para a loja e para a central.
+function ordenarProdutos(lista, mapa, soDescricao) {
+  const cmp = (a, b) => String(a ?? "").localeCompare(String(b ?? ""), "pt-BR", { sensitivity: "base" });
+  const m = mapa || {};
+  const og = (f) => m[f] ?? m[grupoFornecedor(f)] ?? 1e6;
+  return lista.sort((a, b) => soDescricao ? cmp(a.d, b.d)
+    : (og(a.f) - og(b.f)) || cmp(grupoFornecedor(a.f), grupoFornecedor(b.f)) || cmp(a.f, b.f) || cmp(a.d, b.d));
+}
 
 // ---------- utilidades ----------
 function agoraSP() { return new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })); }
@@ -418,9 +427,8 @@ async function abrirSetor(s) {
   gravarFila(fila);
   tudoConfirmado = dados.pedido.every((p) => p.ok !== false);
   obsOriginal = dados.obs || "";
-  // ordenação: Fornecedor e Descrição (Flores: só Descrição)
-  const cmp = (a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" });
-  dados.produtos.sort((a, b) => (R.flores ? 0 : cmp(a.f, b.f)) || cmp(a.d, b.d));
+  // ordenação: ordem dos fornecedores do setor, Fornecedor e Descrição (Flores: só Descrição)
+  ordenarProdutos(dados.produtos, dados.ordem, R.flores);
   renderSetor();
   if (recuperados) {
     toast(`${recuperados} ${recuperados === 1 ? "item digitado" : "itens digitados"} sem internet ${recuperados === 1 ? "foi recuperado" : "foram recuperados"} deste aparelho e ${recuperados === 1 ? "está sendo enviado" : "estão sendo enviados"}.`, "ok");
@@ -431,7 +439,7 @@ async function abrirSetor(s) {
 function colunasSetor() {
   const c = [];
   if (R.erp) c.push(["cod", "Cód. ERP", "74px"]);
-  c.push(R.flores ? ["barra", "Cód. Barra", "128px"] : ["forn", "Fornecedor", "minmax(110px, .55fr)"]);
+  if (R.flores) c.push(["barra", "Cód. Barra", "128px"]);   // nos outros setores o fornecedor vira o título de cada bloco
   if (R.foto) c.push(["foto", "Foto", R.miniatura ? "64px" : "54px"]);
   c.push(["desc", "Descrição", "minmax(0, 1.6fr)"]);
   if (R.media) c.push(["media", "Média", "68px"]);
@@ -451,14 +459,14 @@ function renderSetor() {
   const cols = colunasSetor();
   const grupos = gruposDoSetor();
   const temProdutos = dados.produtos.length > 0;
-  const linhas = dados.produtos.map((p) => {
+  const linhaHtml = (p) => {
     const v = valores[p.c] ?? "";
     const cel = {
       cod: `<span class="p-cod num">${esc(p.erp)}</span>`,
       barra: `<span class="p-forn num">${esc(p.b)}</span>`,
       forn: `<span class="p-forn">${esc(p.f)}</span>`,
       foto: `<span class="p-foto">${fotoHtml(p)}</span>`,
-      desc: `<span class="p-nome">${esc(p.d)}<small>${esc(R.flores ? p.b : p.f)}${R.erp ? " · " + esc(p.erp) : ""}</small></span>`,
+      desc: `<span class="p-nome">${esc(p.d)}<small>${esc(R.flores ? p.b : "")}${R.flores && R.erp ? " · " : ""}${R.erp ? esc(p.erp) : ""}</small></span>`,
       media: `<span class="p-num num">${fmtNum(p.m, 2)}</span>`,
       est: `<span class="p-num num">${fmtNum(Math.trunc(p.e))}</span>`,
       ant: `<span class="p-num p-ant ${R.texto ? "" : "num"}" title="Pedido desta loja no ciclo fechado em ${esc(histCiclo || "")}">${esc(hist[p.c] || "–")}</span>`,
@@ -469,7 +477,21 @@ function renderSetor() {
     const info = [R.media ? `média ${fmtNum(p.m, 2)}` : "", R.erp ? `estoque ${fmtNum(Math.trunc(p.e))}` : "", histCiclo && hist[p.c] ? `últ. ${hist[p.c]}` : ""].filter(Boolean).join(" · ");
     return `<div class="produto" data-linha="${p.c}" data-g="${esc(grupoFornecedor(p.f))}" data-busca="${esc(norm(p.d + " " + (R.erp ? p.erp : "") + " " + (R.flores ? p.b : "")))}">
       ${cols.map(([k]) => cel[k]).join("")}${info ? `<span class="p-info num">${info}</span>` : ""}<span class="aviso-curva" hidden></span></div>`;
-  }).join("");
+  };
+  const cabecalho = `<div class="cab-lista">${cols.map(([k, t]) => `<span class="${["media", "est", "qtd"].includes(k) || (k === "ant" && !R.texto) ? "dir" : ""}">${t}</span>`).join("")}</div>`;
+  const estiloCols = `--colunas:${cols.map((c) => c[2]).join(" ")}`;
+  // um bloco por fornecedor (mesma separação da Visão Fornecedores); Flores fica numa lista só
+  const blocos = [];
+  for (const p of dados.produtos) {
+    const f = R.flores ? "" : String(p.f || "").trim() || "Sem fornecedor";
+    if (!blocos.length || blocos[blocos.length - 1].f !== f) blocos.push({ f, prods: [] });
+    blocos[blocos.length - 1].prods.push(p);
+  }
+  const listas = blocos.map((b) => R.flores
+    ? `<div class="cartao"><div class="lista-produtos" style="${estiloCols}">${cabecalho}${b.prods.map(linhaHtml).join("")}</div></div>`
+    : `<section class="cartao bloco-forn-loja" data-g="${esc(grupoFornecedor(b.f))}">
+        <h3>Fornecedor: ${esc(b.f)} <small>${b.prods.length} ${b.prods.length === 1 ? "produto" : "produtos"}</small></h3>
+        <div class="lista-produtos" style="${estiloCols}">${cabecalho}${b.prods.map(linhaHtml).join("")}</div></section>`).join("");
 
   $("#conteudo").innerHTML = `<div class="pagina">
     ${dados.sem_pedido ? '<p class="faixa ok"><span>Hoje esta loja informou que não fará pedido neste setor. Se lançar itens e salvar, a marca de "sem pedido" sai sozinha.</span></p>' : ""}
@@ -482,20 +504,17 @@ function renderSetor() {
         <input class="busca" id="busca" type="search" placeholder="Buscar produto por nome${R.erp ? " ou código" : ""}${R.flores ? " ou cód. barra" : ""}" autocomplete="off">
         <span class="salvo" id="salvo"></span>
       </div>
-      ${temProdutos ? `<div class="lista-produtos" style="--colunas:${cols.map((c) => c[2]).join(" ")}">
-        <div class="cab-lista">${cols.map(([k, t]) => `<span class="${["media", "est", "qtd"].includes(k) || (k === "ant" && !R.texto) ? "dir" : ""}">${t}</span>`).join("")}</div>
-        ${linhas}
-        <p class="vazio" id="nada-filtro" hidden>Nenhum produto com esse filtro.</p>
-      </div>` : '<p class="vazio">Nenhum produto liberado para esta loja neste setor.</p>'}
+      ${temProdutos ? '<p class="vazio" id="nada-filtro" hidden>Nenhum produto com esse filtro.</p>' : '<p class="vazio">Nenhum produto liberado para esta loja neste setor.</p>'}
       ${dados.estoque_em && R.erp ? `<p class="aviso-estoque" style="margin-top:12px">Estoque do ERP atualizado em ${esc(dados.estoque_em)}.</p>` : ""}
     </div>
+    ${temProdutos ? `<div id="listas">${listas}</div>` : ""}
     ${R.obs ? `<div class="cartao"><h3>Observação geral da loja</h3>
       <textarea class="obs-loja" id="obs-loja" placeholder="Ex.: 2 estiletes; 2 grampeadores; 2 sacos de enforca gato...">${esc(obsOriginal)}</textarea>
       <p class="dica" style="margin-top:8px">Recados para a separação (itens fora da lista, pedidos especiais). É salva junto com o pedido.</p></div>` : ""}
   </div>`;
 
   // eventos da lista
-  const lista = $(".lista-produtos");
+  const lista = $("#listas");
   if (lista) {
     lista.addEventListener("input", (e) => { const i = e.target.closest("input[data-c]"); if (i) aoDigitar(i, false); });
     lista.addEventListener("change", (e) => { const i = e.target.closest("input[data-c]"); if (i) aoDigitar(i, true); });
@@ -557,6 +576,8 @@ function aplicarFiltro() {
     const ok = (filtroForn === "Todos" || l.dataset.g === filtroForn) && (!q || l.dataset.busca.includes(q));
     l.hidden = !ok; if (ok) n++;
   });
+  // esconde o bloco do fornecedor que ficou sem nenhum produto visível
+  $$(".bloco-forn-loja").forEach((b) => { b.hidden = !$(".produto:not([hidden])", b); });
   const nada = $("#nada-filtro"); if (nada) nada.hidden = n > 0;
 }
 
@@ -783,7 +804,10 @@ function linhasExport() {
 }
 function colunasExport() {
   // mesmas colunas da tela, sem a Foto
-  return colunasSetor().filter(([k]) => k !== "foto" && k !== "ant").map(([k]) => ({
+  const base = colunasSetor().filter(([k]) => k !== "foto" && k !== "ant");
+  // na tela o fornecedor virou título do bloco; na impressão e no Excel a coluna continua
+  if (!R.flores) base.splice(R.erp ? 1 : 0, 0, ["forn"]);
+  return base.map(([k]) => ({
     k,
     tela: { cod: "Cód. ERP", barra: "Cód. Barra", forn: "Fornecedor", desc: "Descrição", media: "Média (90d)", est: "Estoque ERP", qtd: "Pedido" }[k],
     excel: { cod: "Código", barra: "Cód. Barra", forn: "Fornecedor", desc: "Descrição", media: "Média (90d)", est: "Estoque", qtd: "Pedido" }[k],

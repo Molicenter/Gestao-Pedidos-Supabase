@@ -568,3 +568,8 @@ details.alerta-curva table { width: auto; min-width: 60%; }
 .aviso-fotos > span { flex: 1; min-width: 240px; }
 .barra-prog { height: 8px; border-radius: 6px; background: color-mix(in srgb, currentColor 18%, transparent); margin: 8px 0 4px; overflow: hidden; }
 .barra-prog i { display: block; height: 100%; background: currentColor; border-radius: 6px; transition: width .3s; }
+
+/* v1.7.3 — produtos separados por fornecedor (Visão das Lojas e Separação) */
+.bloco-forn-loja h3 { margin-bottom: 6px; }
+.grade tr.linha-forn td { position: sticky; left: 0; background: var(--superficie-2); color: var(--azul-escuro); font-weight: 800; font-size: .9rem; padding: 10px 8px 6px; border-top: 2px solid var(--borda); }
+.grade tr.linha-forn td small { font-weight: 600; color: var(--texto-fraco); font-size: .78rem; margin-left: 8px; }

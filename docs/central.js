@@ -306,8 +306,7 @@ function prepararDados(d) {
     cExt[e.c] = { ...x }; cExtOrig[e.c] = { ...x };
   }
   for (const [c, l, m] of d.medias) cMedia[chave(c, l)] = Number(m) || 0;
-  const cmp = (a, b) => String(a).localeCompare(String(b), "pt-BR", { sensitivity: "base" });
-  d.produtos.sort((a, b) => (cR.flores ? 0 : cmp(a.f, b.f)) || cmp(a.d, b.d));
+  ordenarProdutos(d.produtos, d.ordem, cR.flores);
   // só produtos liberados em pelo menos uma loja
   d.ativos = d.produtos.filter((p) => cBloq[p.c].size < 8);
 }
@@ -414,7 +413,14 @@ function desenharGradeSeparacao() {
     <table><thead><tr><th>Cód. ERP</th><th>Descrição</th><th>Loja</th><th>Pedido</th><th>Média</th><th>Vezes</th></tr></thead><tbody>
     ${alertas.map((a) => `<tr><td class="num">${esc(a.p.erp)}</td><td>${esc(a.p.d)}</td><td>${nomeLoja(a.l)}</td><td class="num">${a.q}</td><td class="num">${fmtNum(a.m, 2)}</td><td class="num"><b>${fmtNum(a.x, 1)}</b></td></tr>`).join("")}</tbody></table>`;
   $("#c-grade").innerHTML = `<thead><tr>${cols.map((c) => `<th class="${c.loja || c.k === "total" ? "num-col" : ""}" ${c.loja ? `title="${nomeLoja(c.loja)}"` : ""}>${c.t}</th>`).join("")}</tr></thead>
-    <tbody>${linhas.map((p) => `<tr data-c="${p.c}">${cols.map((c) => celulaGrade(p, c, porCod)).join("")}</tr>`).join("")
+    <tbody>${linhas.map((p, i) => {
+      // linha de título a cada fornecedor novo (mesma separação da Visão Fornecedores)
+      const f = String(p.f || "").trim() || "Sem fornecedor";
+      const novo = !cR.flores && (i === 0 || f !== (String(linhas[i - 1].f || "").trim() || "Sem fornecedor"));
+      const qtd = novo ? linhas.filter((x) => (String(x.f || "").trim() || "Sem fornecedor") === f).length : 0;
+      return (novo ? `<tr class="linha-forn"><td colspan="${cols.length}">Fornecedor: ${esc(f)} <small>${qtd} ${qtd === 1 ? "produto" : "produtos"}</small></td></tr>` : "")
+        + `<tr data-c="${p.c}">${cols.map((c) => celulaGrade(p, c, porCod)).join("")}</tr>`;
+    }).join("")
       || `<tr><td colspan="${cols.length}" class="vazio">Nenhum produto com esse filtro.</td></tr>`}</tbody>`;
   atualizarMetrica();
 }
